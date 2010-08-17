@@ -20,6 +20,7 @@ package org.apache.zookeeper.server.quorum;
 import java.io.IOException;
 import java.io.PrintWriter;
 
+import org.apache.zookeeper.common.fd.FailureDetector;
 import org.apache.zookeeper.server.ZKDatabase;
 import org.apache.zookeeper.server.ZooKeeperServer;
 import org.apache.zookeeper.server.persistence.FileTxnSnapLog;
@@ -32,12 +33,12 @@ public abstract class QuorumZooKeeperServer extends ZooKeeperServer {
     protected final QuorumPeer self;
 
     protected QuorumZooKeeperServer(FileTxnSnapLog logFactory, int tickTime,
-            int minSessionTimeout, int maxSessionTimeout,
+            int minSessionTimeout, int maxSessionTimeout, FailureDetector fd,
             DataTreeBuilder treeBuilder, ZKDatabase zkDb, QuorumPeer self)
         throws IOException
     {
         super(logFactory, tickTime, minSessionTimeout, maxSessionTimeout,
-                treeBuilder, zkDb);
+                fd, treeBuilder, zkDb);
         this.self = self;
     }
 
@@ -58,5 +59,10 @@ public abstract class QuorumZooKeeperServer extends ZooKeeperServer {
         pwriter.println(self.quorumPeers.get(self.getId()).addr.getPort());
         pwriter.print("peerType=");
         pwriter.println(self.getLearnerType().ordinal());
+        pwriter.print("sessionsFDClass=");
+        pwriter.println(self.getSessionsFd().getClass());
+        pwriter.print("learnersFDClass=");
+        pwriter.println(self.getLeanersFd().getClass());
     }
 }
+    

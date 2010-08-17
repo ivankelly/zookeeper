@@ -32,10 +32,13 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Map.Entry;
 
 import org.apache.log4j.Logger;
 import org.apache.zookeeper.AsyncCallback.DataCallback;
 import org.apache.zookeeper.ZooDefs.Ids;
+import org.apache.zookeeper.common.fd.FailureDetector;
+import org.apache.zookeeper.common.fd.FailureDetectorFactory;
 import org.apache.zookeeper.data.ACL;
 import org.apache.zookeeper.data.Id;
 import org.apache.zookeeper.data.Stat;
@@ -155,12 +158,25 @@ public class ZooKeeperMain {
         public MyCommandOptions() {
           options.put("server", "localhost:2181");
           options.put("timeout", "30000");
+          options.put("fd", "fixedhb");
         }
 
         public String getOption(String opt) {
             return options.get(opt);
         }
 
+        public Map<String, String> parseOptionsStartingWith(String prefix) {
+            Map<String,String> optsPrefix = new HashMap<String,String>();
+            
+            for (Entry<String, String> entry : options.entrySet()) {
+                if (entry.getKey().startsWith(prefix)) {
+                    String key = entry.getKey().substring(prefix.length());
+                    optsPrefix.put(key, entry.getValue());
+                }
+            }
+            return optsPrefix;
+        }
+        
         public String getCommand( ) {
             return command;
         }
@@ -194,6 +210,10 @@ public class ZooKeeperMain {
                         options.put("server", it.next());
                     } else if (opt.equals("-timeout")) {
                         options.put("timeout", it.next());
+                    } else if (opt.equals("-fd")) {
+                        options.put("fd", it.next());
+                    } else if (opt.startsWith("-fd.")) {
+                        options.put(opt.substring(1), it.next());
                     }
                 } catch (NoSuchElementException e){
                     System.err.println("Error: no argument found for option "
@@ -259,9 +279,21 @@ public class ZooKeeperMain {
             zk.close();
         }
         host = newHost;
+        
+        String fdName = cl.getOption("fd");
+        String fdPrefix = "fd." + fdName + ".";
+        
+        FailureDetector fd = new FailureDetectorFactory().createFd(
+                fdName, cl.parseOptionsStartingWith(fdPrefix));
+        
+        if (fd == null) {
+            throw new IllegalArgumentException(
+                    "No failure detection method was defined.");
+        }
+        
         zk = new ZooKeeper(host,
                  Integer.parseInt(cl.getOption("timeout")),
-                 new MyWatcher());
+                 new MyWatcher(), fd);
     }
     
     public static void main(String args[])

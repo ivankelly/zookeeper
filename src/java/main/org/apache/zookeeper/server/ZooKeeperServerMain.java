@@ -105,6 +105,7 @@ public class ZooKeeperServerMain {
             zkServer.setTickTime(config.tickTime);
             zkServer.setMinSessionTimeout(config.minSessionTimeout);
             zkServer.setMaxSessionTimeout(config.maxSessionTimeout);
+            zkServer.setFailureDetector(config.getSessionsFailureDetector());
             cnxnFactory = new NIOServerCnxn.Factory(config.getClientPortAddress(),
                     config.getMaxClientCnxns());
             cnxnFactory.startup(zkServer);

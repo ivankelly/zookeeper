@@ -1,0 +1,628 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2002-2004 The Apache Software Foundation
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+<!DOCTYPE article PUBLIC "-//OASIS//DTD Simplified DocBook XML V1.0//EN"
+"http://www.oasis-open.org/docbook/xml/simple/1.0/sdocbook.dtd">
+<article id="ar_FailureDetector">
+  <title>ZooKeeper Failure Detector Module</title>
+
+  <articleinfo>
+    <legalnotice>
+      <para>Licensed under the Apache License, Version 2.0 (the "License");
+      you may not use this file except in compliance with the License. You may
+      obtain a copy of the License at <ulink
+      url="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</ulink>.</para>
+
+      <para>Unless required by applicable law or agreed to in writing,
+      software distributed under the License is distributed on an "AS IS"
+      BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied. See the License for the specific language governing permissions
+      and limitations under the License.</para>
+    </legalnotice>
+
+    <abstract>
+      <para>This article contains detailed information about the Failure Detector module
+      operation and configuration.</para>
+
+    </abstract>
+  </articleinfo>
+
+  <section id="ch_Introduction">
+    <title>Introduction</title>
+
+    <para>In this tutorial, we show how the Failure Detector module works, 
+    algorithmic details of the several failure detector implementations available in ZooKeeper
+    and how to configure failure detection in its different levels.</para>
+    
+    <para>The failure detector module works as a monitoring oracle for the ZooKeeper. 
+	The ZooKeeper tells the module which objects it intends to monitor, and then the module
+	is responsible for indicating which objects are to be pinged and which ones have failed.
+	</para>
+    
+    <para>This module represents abstractions for failure detection in several parts of ZooKeeper:</para>
+    <itemizedlist>
+    	<listitem><para>Client session monitoring in quorum leader and standalone servers.</para></listitem>
+		<listitem><para>Server monitoring in clients.</para></listitem>
+		<listitem><para>Learners monitoring in quorum leader.</para></listitem>
+	</itemizedlist>
+	
+	<para>Also, by detaching failure detection code from the application code, 
+	this module permits an easy way of implementing new failure detection methods. By default,
+	five methods of failure detection are implemented in ZooKeeper:</para>
+	<itemizedlist>
+    	<listitem><para>Fixed heartbeat</para></listitem>
+		<listitem><para>Sliced fixed heartbeat</para></listitem>
+		<listitem><para>Chen</para></listitem>
+		<listitem><para>Bertier</para></listitem>
+		<listitem><para>Phi-Accrual</para></listitem>
+	</itemizedlist>
+ </section>
+   
+ <section id="ch_algorithms">
+    <title>Failure detection algorithms</title>
+
+	<para>Failure detection methods based in heartbeats may have a fixed or a variable timeout value. 
+	When the timeout value changes, the failure detection is classified as an adaptive one. 
+	The goal of adaptive failure detectors is to adapt to changing network conditions.
+	Here we characterize five failure detection methods that are already implemented in ZooKeeper. 
+	The first two are fixed ones and the others are adaptive:</para> 
+
+    <section id="sc_fixed_hb">
+ 		<title>Fixed heartbeat</title>
+ 		<para>This is the simplest strategy for failure detection. The application
+ 		sets the timeout for a monitored to be considered failed, and this timeout
+ 		remains static.</para>
+ 		<itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>fixedhb</emphasis></para></listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_sliced_fixed_hb">
+ 		<title>Sliced fixed heartbeat</title>
+ 		<para>This strategy is similar to the fixed heartbeat one, however it
+ 		groups monitored objects in expiration time slices according to their
+ 		timeouts. When the expiration time for a slice is reached, all monitored
+ 		objects that belong to this slice are considered failed. In this strategy
+ 		the expiration time slice is configurable.</para>
+ 		<itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>slicedhb</emphasis></para></listitem>
+	    	<listitem><para>Parameters:</para>
+	    		<itemizedlist>
+	    		<listitem><para><emphasis>slice</emphasis>: the time slice size; default value: 5000ms.</para></listitem>
+	    		</itemizedlist>
+	    	</listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_chen">
+ 		<title>Chen</title>
+ 		<para>In [1], Chen et al. proposes an adaptive strategy to estimate timeouts
+ 		for monitored objects according to the network state. It basically tracks 
+ 		the received heartbeats in sampling windows and computes the average arrival 
+ 		times. Every time a new heartbeat is received from a monitored object, 
+ 		the corresponding timeout is estimated. This strategy also adds to this 
+ 		estimation a static, but configurable, safety margin <emphasis>alpha</emphasis>.
+ 		</para>
+		<itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>chen</emphasis></para></listitem>
+	    	<listitem><para>Parameters:</para>
+	    		<itemizedlist>
+	    		<listitem><para><emphasis>alpha</emphasis>: safety margin parameter; default value: 1250ms.</para></listitem>
+	    		</itemizedlist>
+	    	</listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_bertier">
+ 		<title>Bertier</title>
+ 		<para>In [2], Bertier et al. proposes an strategy similar to Chen's, 
+ 		though it does not require the safety margin to be statically defined. 
+ 		This failure detector’s parameter estimation method adopts Chen et al. estimation 
+ 		of the message expected arrival time and Jacobson’s estimation[4] of safety margin.
+ 		In addition to this, when a false suspicion is detected, Bertier's strategy perform 
+ 		a second level moderation, increasing the time to assume a monitored object has failed.
+ 		</para>
+		<itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>bertier</emphasis></para></listitem>
+	    	<listitem><para>Parameters:</para>
+	    		<itemizedlist>
+	    		<listitem><para><emphasis>gamma</emphasis>: Represents the importance of the last calculated error on the
+				estimation of the safety margin; default value: 0.1</para></listitem>
+				<listitem><para><emphasis>beta</emphasis>: Represents the importance of the calculated delay on the
+				estimation of the safety margin; default value: 1</para></listitem>
+				<listitem><para><emphasis>phi</emphasis>: Permits to ponder the variance on the estimation of the safety
+				margin; default value: 4</para></listitem>
+				<listitem><para><emphasis>moderationstep</emphasis>: The step to be added to timeout when a false suspicion is
+				detected; default value: 1000ms</para></listitem>
+	    		</itemizedlist>
+	    	</listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_phiaccrual">
+ 		<title>Phi-Accrual</title>
+ 		<para>In [3], Hayashibara et al. proposes the Phi-accrual failure detector. 
+ 		Instead of outputting a boolean value to the application, accrual methods output a 
+ 		value in a continuum scale to the application, meaning the suspicion level for a 
+ 		given monitored object. In the Phi-accrual method, the interarrival times of 
+ 		heartbeats are modeled by a normal distribution, and the suspicion
+		level of this failure detector is given by a value called phi.</para>
+		
+		<para>To use the Phi-accrual strategy in ZooKeeper, we define a threshold for the phivalue, 
+		that, when exceeded, we assume the corresponding monitored object has failed.
+		This threshold is the configurable parameter for the Phi-accrual failure detector.</para>
+	    <itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>phiaccrual</emphasis></para></listitem>
+	    	<listitem><para>Parameters:</para>
+	    		<itemizedlist>
+	    		<listitem><para><emphasis>threshold</emphasis>: When the phi value exceeds 
+	    		this threshold for a certain monitored object, the failure detector considers 
+	    		this object as failed; default value: 4.0</para></listitem>
+	    		<listitem><para><emphasis>minwindowsize</emphasis>: the sampling window minimum size 
+	    		for the failure detector to become active. This lower bound gives the failure detector 
+	    		a warm-up period; default value: 500</para></listitem>
+	    		</itemizedlist>
+	    	</listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_common">
+ 		<title>Common characteristics</title>
+ 		<para>All failure detectors above adopt a pinging interval corresponding to
+ 		a half of the static timeout defined for a monitored object.</para>
+ 		
+ 		<para>It is also important to mention that ZooKeeper uses application messages as hearbeats, 
+ 		so actual pings and heartbeats are used only at idle states. Failure detectors are aware
+ 		of this feature, and they eventually treat application messages in a different way they
+ 		treat heartbeat messages.</para>
+  	</section>
+  	
+</section> 
+
+<section id="ch_usage">
+	<title>Usage in ZooKeeper</title>
+	<para>As said previously, the failure detector module is used in three different parts 
+	of ZooKeeper:</para>
+	<itemizedlist>
+    	<listitem><para>Client session monitoring in quorum leader and standalone servers: 
+    	in this case, the Leader (or a standalone server) uses the module to check if the
+    	client sessions are still alive. If not, the session is expired. </para>
+    	
+    	<para>Only the leader is responsible for determining session expiration. 
+    	The role of the learner in this case is to periodically report to the leader 
+    	hearbeat sampling information, such as mean and standard deviation of the 
+    	interarrival times, so the leader can update the failure detector.
+    	By default, the sliced fixed heartbeat strategy is used in this part.</para></listitem>
+		
+		<listitem><para>Server monitoring in clients: clients also monitor the ZooKeeper 
+		server in which they are connected using the failure detector module. In this case,
+		the failure detector is also responsible for determining when the client is supposed
+		to send a ping message to the server. This feature is not implemented in the C client yet.
+		By default, the fixed heartbeat strategy is used in this part.</para></listitem>
+		
+		<listitem><para>Learners monitoring in quorum leader: a leader must be synced with
+		its learners, so in this sense, it also uses the failure detector module to monitor
+		the learners and to determine its pinging interval. Also, the 
+		fixed heartbeat strategy is used in this part.</para></listitem>
+	</itemizedlist>
+</section>
+
+<section id="ch_configuration">
+	<title>Configuration</title>
+	
+	<section id="sc_client_conf">
+ 		<title>Command line client configuration</title>
+ 		<para>To configure the command line client failure detector, use the option <emphasis>-fd</emphasis>.
+ 		This option defines the failure detector method to be used according to its logical name. Eg.:
+ 		</para>
+ 		<programlisting>
+bin/zkCli.sh -server 127.0.0.1:2181 -fd chen		
+		</programlisting>
+		<para>This will instantiate a Chen failure detector with default <emphasis>alpha</emphasis> value.
+ 		</para>
+		
+		<para>To refer to the failure detector parameters, we concatenate the failure detector 
+		prefix, the failure detector name and the parameter name. So, to configure a failure 
+		detector parameter in the command line client use the option <emphasis>-fd.fdname.fdparameter</emphasis>, eg.:
+ 		</para>
+ 		<programlisting>
+bin/zkCli.sh -server 127.0.0.1:2181 -fd chen -fd.chen.alpha=1000		
+		</programlisting>
+		<para>This will instantiate a Chen failure detector with an <emphasis>alpha</emphasis> value of 1000ms.
+ 		</para>
+  	</section>
+	
+	<section id="sc_server_conf">
+ 		<title>Server configuration</title>
+ 		<para>Failure detection configuration in ZooKeeper server is similar to the
+ 		command line client configuration. However, at server side, the failure detection
+ 		module is used in two different parts: at the learners monitoration and at the client
+ 		session tracking. In this case, we need two different failure detection options prefixes:
+ 		<emphasis>sessionsFD</emphasis> and <emphasis>learnersFD</emphasis>.
+ 		</para>
+ 		<para>Here we show a configuration file sample:</para>
+ 		<programlisting>
+tickTime=2000
+dataDir=/var/zookeeper
+clientPort=2181
+initLimit=5
+syncLimit=2
+sessionsFD=chen
+learnersFD=bertier
+		</programlisting>
+		<para>This will instantiate a Chen failure detector with default <emphasis>alpha</emphasis> value for
+		the session tracking, and it will instantiate a Bertier failure detector with default parameters values
+		for the learners' monitoring.
+ 		</para>
+		
+		<para>Configuration of the failure detector parameters is analogous to command line configuration, eg.:
+ 		</para>
+ 		<programlisting>
+tickTime=2000
+dataDir=/var/zookeeper
+clientPort=2181
+initLimit=5
+syncLimit=2
+sessionsFD=chen
+sessionsFD.chen.alpha=2000
+learnersFD=phiaccrual
+learnersFD.phiaccrual.threshold=2	
+		</programlisting>
+		<para>This will instantiate a Chen failure detector with default an <emphasis>alpha</emphasis> value of 1000ms for
+		the session tracking, and it will instantiate a Phi Accrual failure detector with a threshold of 2.
+ 		</para>
+  	</section>
+	
+</section>
+
+<section id="ch_references">
+	<title>References</title>
+
+	<itemizedlist>
+    	<listitem><para>[1] Wei Chen, Sam Toueg, Marcos Kawazoe Aguilera, 
+    	"On the Quality of Service of Failure Detectors," IEEE Transactions on Computers, 
+    	vol. 51, no. 1, pp. 13-32, Jan. 2002, doi:10.1109/12.980014</para></listitem>
+		<listitem><para>[2] M. Bertier, O. Marin, and P. Sens, “Implementation and 
+		performance evaluation of an adaptable failure detector,” in Proc. 15th Intl.
+		Conf. on Dependable Systems and Networks (DSN’02), Washington, D.C., 
+		USA, June 2002, pp. 354–363.</para></listitem>
+		<listitem><para>[3] Naohiro Hayashibara, Xavier Défago, Rami Yared, Takuya Katayama, 
+		"The Φ Accrual Failure Detector," srds, pp.66-78, 23rd IEEE International 
+		Symposium on Reliable Distributed Systems (SRDS'04), 2004</para></listitem>
+		<listitem><para>[4] Van Jacobson. Congestion Avoidance and Control. In ACM SIGCOMM Computer
+		Communication Review, volume 25(1), pages 157 – 187. ACM Press New York, NY, USA, 1995.</para></listitem>
+	</itemizedlist>
+
+</section>
+
+</article>
+
+        
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2002-2004 The Apache Software Foundation
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+<!DOCTYPE article PUBLIC "-//OASIS//DTD Simplified DocBook XML V1.0//EN"
+"http://www.oasis-open.org/docbook/xml/simple/1.0/sdocbook.dtd">
+<article id="ar_FailureDetector">
+  <title>ZooKeeper Failure Detector Module</title>
+
+  <articleinfo>
+    <legalnotice>
+      <para>Licensed under the Apache License, Version 2.0 (the "License");
+      you may not use this file except in compliance with the License. You may
+      obtain a copy of the License at <ulink
+      url="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</ulink>.</para>
+
+      <para>Unless required by applicable law or agreed to in writing,
+      software distributed under the License is distributed on an "AS IS"
+      BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied. See the License for the specific language governing permissions
+      and limitations under the License.</para>
+    </legalnotice>
+
+    <abstract>
+      <para>This article contains detailed information about the Failure Detector module
+      operation and configuration.</para>
+
+    </abstract>
+  </articleinfo>
+
+  <section id="ch_Introduction">
+    <title>Introduction</title>
+
+    <para>In this tutorial, we show how the Failure Detector module works, 
+    algorithmic details of the several failure detector implementations available in ZooKeeper
+    and how to configure failure detection in its different levels.</para>
+    
+    <para>The failure detector module works as a monitoring oracle for the ZooKeeper. 
+	The ZooKeeper tells the module which objects it intends to monitor, and then the module
+	is responsible for indicating which objects are to be pinged and which ones have failed.
+	</para>
+    
+    <para>This module represents abstractions for failure detection in several parts of ZooKeeper:</para>
+    <itemizedlist>
+    	<listitem><para>Client session monitoring in quorum leader and standalone servers.</para></listitem>
+		<listitem><para>Server monitoring in clients.</para></listitem>
+		<listitem><para>Learners monitoring in quorum leader.</para></listitem>
+	</itemizedlist>
+	
+	<para>Also, by detaching failure detection code from the application code, 
+	this module permits an easy way of implementing new failure detection methods. By default,
+	five methods of failure detection are implemented in ZooKeeper:</para>
+	<itemizedlist>
+    	<listitem><para>Fixed heartbeat</para></listitem>
+		<listitem><para>Sliced fixed heartbeat</para></listitem>
+		<listitem><para>Chen</para></listitem>
+		<listitem><para>Bertier</para></listitem>
+		<listitem><para>Phi-Accrual</para></listitem>
+	</itemizedlist>
+ </section>
+   
+ <section id="ch_algorithms">
+    <title>Failure detection algorithms</title>
+
+	<para>Failure detection methods based in heartbeats may have a fixed or a variable timeout value. 
+	When the timeout value changes, the failure detection is classified as an adaptive one. 
+	The goal of adaptive failure detectors is to adapt to changing network conditions.
+	Here we characterize five failure detection methods that are already implemented in ZooKeeper. 
+	The first two are fixed ones and the others are adaptive:</para> 
+
+    <section id="sc_fixed_hb">
+ 		<title>Fixed heartbeat</title>
+ 		<para>This is the simplest strategy for failure detection. The application
+ 		sets the timeout for a monitored to be considered failed, and this timeout
+ 		remains static.</para>
+ 		<itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>fixedhb</emphasis></para></listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_sliced_fixed_hb">
+ 		<title>Sliced fixed heartbeat</title>
+ 		<para>This strategy is similar to the fixed heartbeat one, however it
+ 		groups monitored objects in expiration time slices according to their
+ 		timeouts. When the expiration time for a slice is reached, all monitored
+ 		objects that belong to this slice are considered failed. In this strategy
+ 		the expiration time slice is configurable.</para>
+ 		<itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>slicedhb</emphasis></para></listitem>
+	    	<listitem><para>Parameters:</para>
+	    		<itemizedlist>
+	    		<listitem><para><emphasis>slice</emphasis>: the time slice size; default value: 5000ms.</para></listitem>
+	    		</itemizedlist>
+	    	</listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_chen">
+ 		<title>Chen</title>
+ 		<para>In [1], Chen et al. proposes an adaptive strategy to estimate timeouts
+ 		for monitored objects according to the network state. It basically tracks 
+ 		the received heartbeats in sampling windows and computes the average arrival 
+ 		times. Every time a new heartbeat is received from a monitored object, 
+ 		the corresponding timeout is estimated. This strategy also adds to this 
+ 		estimation a static, but configurable, safety margin <emphasis>alpha</emphasis>.
+ 		</para>
+		<itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>chen</emphasis></para></listitem>
+	    	<listitem><para>Parameters:</para>
+	    		<itemizedlist>
+	    		<listitem><para><emphasis>alpha</emphasis>: safety margin parameter; default value: 1250ms.</para></listitem>
+	    		</itemizedlist>
+	    	</listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_bertier">
+ 		<title>Bertier</title>
+ 		<para>In [2], Bertier et al. proposes an strategy similar to Chen's, 
+ 		though it does not require the safety margin to be statically defined. 
+ 		This failure detector’s parameter estimation method adopts Chen et al. estimation 
+ 		of the message expected arrival time and Jacobson’s estimation[4] of safety margin.
+ 		In addition to this, when a false suspicion is detected, Bertier's strategy perform 
+ 		a second level moderation, increasing the time to assume a monitored object has failed.
+ 		</para>
+		<itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>bertier</emphasis></para></listitem>
+	    	<listitem><para>Parameters:</para>
+	    		<itemizedlist>
+	    		<listitem><para><emphasis>gamma</emphasis>: Represents the importance of the last calculated error on the
+				estimation of the safety margin; default value: 0.1</para></listitem>
+				<listitem><para><emphasis>beta</emphasis>: Represents the importance of the calculated delay on the
+				estimation of the safety margin; default value: 1</para></listitem>
+				<listitem><para><emphasis>phi</emphasis>: Permits to ponder the variance on the estimation of the safety
+				margin; default value: 4</para></listitem>
+				<listitem><para><emphasis>moderationstep</emphasis>: The step to be added to timeout when a false suspicion is
+				detected; default value: 1000ms</para></listitem>
+	    		</itemizedlist>
+	    	</listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_phiaccrual">
+ 		<title>Phi-Accrual</title>
+ 		<para>In [3], Hayashibara et al. proposes the Phi-accrual failure detector. 
+ 		Instead of outputting a boolean value to the application, accrual methods output a 
+ 		value in a continuum scale to the application, meaning the suspicion level for a 
+ 		given monitored object. In the Phi-accrual method, the interarrival times of 
+ 		heartbeats are modeled by a normal distribution, and the suspicion
+		level of this failure detector is given by a value called phi.</para>
+		
+		<para>To use the Phi-accrual strategy in ZooKeeper, we define a threshold for the phivalue, 
+		that, when exceeded, we assume the corresponding monitored object has failed.
+		This threshold is the configurable parameter for the Phi-accrual failure detector.</para>
+	    <itemizedlist>
+ 			<listitem><para>Logical name: <emphasis>phiaccrual</emphasis></para></listitem>
+	    	<listitem><para>Parameters:</para>
+	    		<itemizedlist>
+	    		<listitem><para><emphasis>threshold</emphasis>: When the phi value exceeds 
+	    		this threshold for a certain monitored object, the failure detector considers 
+	    		this object as failed; default value: 4.0</para></listitem>
+	    		<listitem><para><emphasis>minwindowsize</emphasis>: the sampling window minimum size 
+	    		for the failure detector to become active. This lower bound gives the failure detector 
+	    		a warm-up period; default value: 500</para></listitem>
+	    		</itemizedlist>
+	    	</listitem>
+		</itemizedlist>
+  	</section>
+  	
+  	<section id="sc_common">
+ 		<title>Common characteristics</title>
+ 		<para>All failure detectors above adopt a pinging interval corresponding to
+ 		a half of the static timeout defined for a monitored object.</para>
+ 		
+ 		<para>It is also important to mention that ZooKeeper uses application messages as hearbeats, 
+ 		so actual pings and heartbeats are used only at idle states. Failure detectors are aware
+ 		of this feature, and they eventually treat application messages in a different way they
+ 		treat heartbeat messages.</para>
+  	</section>
+  	
+</section> 
+
+<section id="ch_usage">
+	<title>Usage in ZooKeeper</title>
+	<para>As said previously, the failure detector module is used in three different parts 
+	of ZooKeeper:</para>
+	<itemizedlist>
+    	<listitem><para>Client session monitoring in quorum leader and standalone servers: 
+    	in this case, the Leader (or a standalone server) uses the module to check if the
+    	client sessions are still alive. If not, the session is expired. </para>
+    	
+    	<para>Only the leader is responsible for determining session expiration. 
+    	The role of the learner in this case is to periodically report to the leader 
+    	hearbeat sampling information, such as mean and standard deviation of the 
+    	interarrival times, so the leader can update the failure detector.
+    	By default, the sliced fixed heartbeat strategy is used in this part.</para></listitem>
+		
+		<listitem><para>Server monitoring in clients: clients also monitor the ZooKeeper 
+		server in which they are connected using the failure detector module. In this case,
+		the failure detector is also responsible for determining when the client is supposed
+		to send a ping message to the server. This feature is not implemented in the C client yet.
+		By default, the fixed heartbeat strategy is used in this part.</para></listitem>
+		
+		<listitem><para>Learners monitoring in quorum leader: a leader must be synced with
+		its learners, so in this sense, it also uses the failure detector module to monitor
+		the learners and to determine its pinging interval. Also, the 
+		fixed heartbeat strategy is used in this part.</para></listitem>
+	</itemizedlist>
+</section>
+
+<section id="ch_configuration">
+	<title>Configuration</title>
+	
+	<section id="sc_client_conf">
+ 		<title>Command line client configuration</title>
+ 		<para>To configure the command line client failure detector, use the option <emphasis>-fd</emphasis>.
+ 		This option defines the failure detector method to be used according to its logical name. Eg.:
+ 		</para>
+ 		<programlisting>
+bin/zkCli.sh -server 127.0.0.1:2181 -fd chen		
+		</programlisting>
+		<para>This will instantiate a Chen failure detector with default <emphasis>alpha</emphasis> value.
+ 		</para>
+		
+		<para>To refer to the failure detector parameters, we concatenate the failure detector 
+		prefix, the failure detector name and the parameter name. So, to configure a failure 
+		detector parameter in the command line client use the option <emphasis>-fd.fdname.fdparameter</emphasis>, eg.:
+ 		</para>
+ 		<programlisting>
+bin/zkCli.sh -server 127.0.0.1:2181 -fd chen -fd.chen.alpha=1000		
+		</programlisting>
+		<para>This will instantiate a Chen failure detector with an <emphasis>alpha</emphasis> value of 1000ms.
+ 		</para>
+  	</section>
+	
+	<section id="sc_server_conf">
+ 		<title>Server configuration</title>
+ 		<para>Failure detection configuration in ZooKeeper server is similar to the
+ 		command line client configuration. However, at server side, the failure detection
+ 		module is used in two different parts: at the learners monitoration and at the client
+ 		session tracking. In this case, we need two different failure detection options prefixes:
+ 		<emphasis>sessionsFD</emphasis> and <emphasis>learnersFD</emphasis>.
+ 		</para>
+ 		<para>Here we show a configuration file sample:</para>
+ 		<programlisting>
+tickTime=2000
+dataDir=/var/zookeeper
+clientPort=2181
+initLimit=5
+syncLimit=2
+sessionsFD=chen
+learnersFD=bertier
+		</programlisting>
+		<para>This will instantiate a Chen failure detector with default <emphasis>alpha</emphasis> value for
+		the session tracking, and it will instantiate a Bertier failure detector with default parameters values
+		for the learners' monitoring.
+ 		</para>
+		
+		<para>Configuration of the failure detector parameters is analogous to command line configuration, eg.:
+ 		</para>
+ 		<programlisting>
+tickTime=2000
+dataDir=/var/zookeeper
+clientPort=2181
+initLimit=5
+syncLimit=2
+sessionsFD=chen
+sessionsFD.chen.alpha=2000
+learnersFD=phiaccrual
+learnersFD.phiaccrual.threshold=2	
+		</programlisting>
+		<para>This will instantiate a Chen failure detector with default an <emphasis>alpha</emphasis> value of 1000ms for
+		the session tracking, and it will instantiate a Phi Accrual failure detector with a threshold of 2.
+ 		</para>
+  	</section>
+	
+</section>
+
+<section id="ch_references">
+	<title>References</title>
+
+	<itemizedlist>
+    	<listitem><para>[1] Wei Chen, Sam Toueg, Marcos Kawazoe Aguilera, 
+    	"On the Quality of Service of Failure Detectors," IEEE Transactions on Computers, 
+    	vol. 51, no. 1, pp. 13-32, Jan. 2002, doi:10.1109/12.980014</para></listitem>
+		<listitem><para>[2] M. Bertier, O. Marin, and P. Sens, “Implementation and 
+		performance evaluation of an adaptable failure detector,” in Proc. 15th Intl.
+		Conf. on Dependable Systems and Networks (DSN’02), Washington, D.C., 
+		USA, June 2002, pp. 354–363.</para></listitem>
+		<listitem><para>[3] Naohiro Hayashibara, Xavier Défago, Rami Yared, Takuya Katayama, 
+		"The Φ Accrual Failure Detector," srds, pp.66-78, 23rd IEEE International 
+		Symposium on Reliable Distributed Systems (SRDS'04), 2004</para></listitem>
+		<listitem><para>[4] Van Jacobson. Congestion Avoidance and Control. In ACM SIGCOMM Computer
+		Communication Review, volume 25(1), pages 157 – 187. ACM Press New York, NY, USA, 1995.</para></listitem>
+	</itemizedlist>
+
+</section>
+
+</article>
+
+        

@@ -59,7 +59,7 @@ public class LearnerHandler extends Thread {
 
     final Leader leader;
 
-    long tickOfLastAck;
+    private long lastAck;
     
     /**
      * ZooKeeper server identifier of this learner
@@ -93,7 +93,7 @@ public class LearnerHandler extends Thread {
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("LearnerHandler ").append(sock);
-        sb.append(" tickOfLastAck:").append(tickOfLastAck());
+        sb.append(" timeOfLastAck:").append(lastAck);
         sb.append(" synced?:").append(synced());
         sb.append(" queuedPacketLength:").append(queuedPackets.size());
         return sb.toString();
@@ -244,6 +244,12 @@ public class LearnerHandler extends Thread {
             	this.sid = leader.followerCounter.getAndDecrement();
             }
 
+            synchronized (leader.getLeanersFd()) {
+                leader.getLeanersFd().registerMonitored(String.valueOf(sid), System
+                        .currentTimeMillis(), leader.self.syncLimit
+                        * leader.self.tickTime);
+            }
+            
             LOG.info("Follower sid: " + this.sid + " : info : "
                     + leader.self.quorumPeers.get(this.sid));
                         
@@ -380,14 +386,24 @@ public class LearnerHandler extends Thread {
                 ia.readRecord(qp, "packet");
 
                 long traceMask = ZooTrace.SERVER_PACKET_TRACE_MASK;
+                long now = System.currentTimeMillis();
                 if (qp.getType() == Leader.PING) {
                     traceMask = ZooTrace.SERVER_PING_TRACE_MASK;
+                    synchronized (leader.getLeanersFd()) {
+                        leader.getLeanersFd().heartbeatReceived(
+                                String.valueOf(getSid()), now);
+                    }
+                } else {
+                    synchronized (leader.getLeanersFd()) {
+                        leader.getLeanersFd().appMessageReceived(
+                                String.valueOf(getSid()), now);
+                    }
                 }
+                lastAck = now;
+                
                 if (LOG.isTraceEnabled()) {
                     ZooTrace.logQuorumPacket(LOG, traceMask, 'i', qp);
                 }
-                tickOfLastAck = leader.self.tick;
-
 
                 ByteBuffer bb;
                 long sessionId;
@@ -411,7 +427,15 @@ public class LearnerHandler extends Thread {
                     while (dis.available() > 0) {
                         long sess = dis.readLong();
                         int to = dis.readInt();
-                        leader.zk.touch(sess, to);
+                        boolean updateSample = dis.readBoolean();
+                        long iaMean = dis.readLong();
+                        long iaStdDev = dis.readLong();
+                        
+                        if (!updateSample) {
+                            leader.zk.touch(sess, to);
+                        } else {
+                            leader.zk.updateHeartbeatSample(sess, to, iaMean, iaStdDev);
+                        }
                     }
                     break;
                 case Leader.REVALIDATE:
@@ -501,10 +525,6 @@ public class LearnerHandler extends Thread {
         leader.removeLearnerHandler(this);
     }
 
-    public long tickOfLastAck() {
-        return tickOfLastAck;
-    }
-
     /**
      * ping calls from the leader to the peers
      */
@@ -516,6 +536,10 @@ public class LearnerHandler extends Thread {
         QuorumPacket ping = new QuorumPacket(Leader.PING, id,
                 null, null);
         queuePacket(ping);
+        synchronized (leader.getLeanersFd()) {
+            leader.getLeanersFd().pingSent(
+                    String.valueOf(sid), System.currentTimeMillis());
+        }
     }
 
     void queuePacket(QuorumPacket p) {
@@ -523,7 +547,11 @@ public class LearnerHandler extends Thread {
     }
 
     public boolean synced() {
-        return isAlive()
-                && tickOfLastAck >= leader.self.tick - leader.self.syncLimit;
+        boolean failed = false;
+        synchronized (leader.getLeanersFd()) {
+            failed = leader.getLeanersFd().getFailedObjects(
+                    System.currentTimeMillis()).contains(String.valueOf(sid));
+        }
+        return isAlive() && !failed;
     }
 }

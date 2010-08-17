@@ -49,7 +49,7 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
     LeaderZooKeeperServer(FileTxnSnapLog logFactory, QuorumPeer self,
             DataTreeBuilder treeBuilder, ZKDatabase zkDb) throws IOException {
         super(logFactory, self.tickTime, self.minSessionTimeout,
-                self.maxSessionTimeout, treeBuilder, zkDb, self);
+                self.maxSessionTimeout, self.sessionsFd, treeBuilder, zkDb, self);
     }
 
     public Leader getLeader(){
@@ -79,7 +79,7 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
     @Override
     protected void createSessionTracker() {
         sessionTracker = new SessionTrackerImpl(this, getZKDatabase().getSessionWithTimeOuts(),
-                tickTime, self.getId());
+                tickTime, self.getId(), self.sessionsFd);
         ((SessionTrackerImpl)sessionTracker).start();
     }
 
@@ -88,6 +88,12 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
         return sessionTracker.touchSession(sess, to);
     }
 
+    public boolean updateHeartbeatSample(long sess, int to, long iaMean,
+            long iaStdDev) {
+        return ((SessionTrackerImpl) sessionTracker).updateHeartbeatSample(
+                sess, to, iaMean, iaStdDev);
+    }
+    
     @Override
     protected void registerJMX() {
         // register with JMX
@@ -173,4 +179,5 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
             // this is ok, it just means that the session revalidation failed.
         }
     }
+
 }
