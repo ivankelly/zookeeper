@@ -217,17 +217,3 @@ void Mutex::unlock() {
     LOG.errorStream() << "Error unlocking mutex " << this << " " << error;
   }
 }
-
-std::size_t std::tr1::hash<HostAddress>::operator()(const HostAddress& address) const {
-  return (address.ip() << 16) & (address.port());
-}
-
-std::size_t std::tr1::hash<DuplexChannel*>::operator()(const DuplexChannel* channel) const {
-  return reinterpret_cast<std::size_t>(channel);
-}
-
-std::size_t std::tr1::hash<TopicSubscriber>::operator()(const TopicSubscriber& topicsub) const {
-  std::string fullstr = topicsub.first + topicsub.second;
-  return std::tr1::hash<std::string>()(fullstr);
-}
-

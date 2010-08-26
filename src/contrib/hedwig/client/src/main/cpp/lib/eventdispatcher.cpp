@@ -16,42 +16,60 @@
  * limitations under the License.
  */
 
-#include <hedwig/client.h>
-#include <memory>
+#include "eventdispatcher.h"
 
-#include "clientimpl.h"
 #include <log4cpp/Category.hh>
 
 static log4cpp::Category &LOG = log4cpp::Category::getInstance("hedwig."__FILE__);
 
 using namespace Hedwig;
 
-const std::string DEFAULT_SERVER = "localhost:4080";
-const std::string& Configuration::getDefaultServer() const {
-  return DEFAULT_SERVER;
+EventDispatcher::EventDispatcher() : service(), dummy_work(NULL), t(NULL) {
 }
 
-Client::Client(const Configuration& conf) {
+void EventDispatcher::run_forever() {
   if (LOG.isDebugEnabled()) {
-    LOG.debugStream() << "Client::Client (" << this << ")";
-  }
-  clientimpl = ClientImpl::Create( conf );
-}
-
-Subscriber& Client::getSubscriber() {
-  return clientimpl->getSubscriber();
-}
-
-Publisher& Client::getPublisher() {
-  return clientimpl->getPublisher();
-}
-
-Client::~Client() {
-  if (LOG.isDebugEnabled()) {
-    LOG.debugStream() << "Client::~Client (" << this << ")";
+    LOG.debugStream() << "Starting event dispatcher";
   }
 
-  clientimpl->Destroy();
+  while (true) {
+    try {
+      service.run();
+      break;
+    } catch (std::exception &e) {
+      LOG.errorStream() << "Exception in dispatch handler. " << e.what();
+    }
+  }
+  if (LOG.isDebugEnabled()) {
+    LOG.debugStream() << "Event dispatcher done";
+  }
 }
 
+void EventDispatcher::start() {
+  if (t) {
+    return;
+  }
+  dummy_work = new boost::asio::io_service::work(service);
+  t = new boost::thread(boost::bind(&EventDispatcher::run_forever, this));
+}
 
+void EventDispatcher::stop() {
+  if (!t) {
+    return;
+  }
+  delete dummy_work;
+  dummy_work = NULL;
+  
+  t->join();
+  delete t;
+  t = NULL;
+}
+
+EventDispatcher::~EventDispatcher() {
+  delete dummy_work;
+  service.stop();
+}
+
+boost::asio::io_service& EventDispatcher::getService() {
+  return service;
+}

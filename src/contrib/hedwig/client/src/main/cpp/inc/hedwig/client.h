@@ -25,17 +25,20 @@
 #include <hedwig/publish.h>
 #include <hedwig/exceptions.h>
 #include <boost/noncopyable.hpp>
+#include <boost/shared_ptr.hpp>
 
 namespace Hedwig {
 
   class ClientImpl;
-  typedef std::tr1::shared_ptr<ClientImpl> ClientImplPtr;
+  typedef boost::shared_ptr<ClientImpl> ClientImplPtr;
 
   class Configuration {
   public:
     Configuration() {};
-
-    virtual const std::string& getDefaultServer() const;    
+    virtual int getReconnectSubscribeRetryWaitTime() const = 0;
+    virtual int getMessageConsumeRetryWaitTime() const = 0;
+    virtual int getSubscriberConsumeRetryWaitTime() const = 0;
+    virtual const std::string& getDefaultServer() const = 0;    
   };
 
   /** 

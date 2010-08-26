@@ -20,11 +20,11 @@
 #include "publisherimpl.h"
 #include "subscriberimpl.h"
 #include <log4cpp/Category.hh>
+#include "concallbacks.h"
 
 static log4cpp::Category &LOG = log4cpp::Category::getInstance("hedwig."__FILE__);
 
 using namespace Hedwig;
-
 
 void SyncOperationCallback::operationComplete() {
   lock();
@@ -74,28 +74,28 @@ void SyncOperationCallback::throwExceptionIfNeeded() {
   }
 }
 
-HedwigClientChannelHandler::HedwigClientChannelHandler(ClientImplPtr& client) 
+HedwigClientChannelHandler::HedwigClientChannelHandler(const ClientImplPtr& client) 
   : client(client){
 }
 
-void HedwigClientChannelHandler::messageReceived(DuplexChannel* channel, const PubSubResponse& m) {
+void HedwigClientChannelHandler::messageReceived(const DuplexChannelPtr& channel, const PubSubResponsePtr& m) {
   LOG.debugStream() << "Message received";
-  if (m.has_message()) {
+  if (m->has_message()) {
     LOG.errorStream() << "Subscription response, ignore for now";
     return;
   }
   
-  long txnid = m.txnid();
-  PubSubDataPtr data = channel->retrieveTransaction(m.txnid()); 
+  long txnid = m->txnid();
+  PubSubDataPtr data = channel->retrieveTransaction(m->txnid()); 
   /* you now have ownership of data, don't leave this funciton without deleting it or 
      palming it off to someone else */
 
   if (data == NULL) {
-    LOG.errorStream() << "Transaction " << m.txnid() << " doesn't exist in channel " << channel;
+    LOG.errorStream() << "Transaction " << m->txnid() << " doesn't exist in channel " << channel;
     return;
   }
 
-  if (m.statuscode() == NOT_RESPONSIBLE_FOR_TOPIC) {
+  if (m->statuscode() == NOT_RESPONSIBLE_FOR_TOPIC) {
     client->redirectRequest(channel, data, m);
     return;
   }
@@ -115,17 +115,17 @@ void HedwigClientChannelHandler::messageReceived(DuplexChannel* channel, const P
 }
 
 
-void HedwigClientChannelHandler::channelConnected(DuplexChannel* channel) {
+void HedwigClientChannelHandler::channelConnected(const DuplexChannelPtr& channel) {
   // do nothing 
 }
 
-void HedwigClientChannelHandler::channelDisconnected(DuplexChannel* channel, const std::exception& e) {
+void HedwigClientChannelHandler::channelDisconnected(const DuplexChannelPtr& channel, const std::exception& e) {
   LOG.errorStream() << "Channel disconnected";
 
   client->channelDied(channel);
 }
 
-void HedwigClientChannelHandler::exceptionOccurred(DuplexChannel* channel, const std::exception& e) {
+void HedwigClientChannelHandler::exceptionOccurred(const DuplexChannelPtr& channel, const std::exception& e) {
   LOG.errorStream() << "Exception occurred" << e.what();
 }
 
@@ -148,165 +148,14 @@ long ClientTxnCounter::next() {  // would be nice to remove lock from here, look
   return next;
 }
 
-
-
-PubSubDataPtr PubSubData::forPublishRequest(long txnid, const std::string& topic, const std::string& body, const OperationCallbackPtr& callback) {
-  PubSubDataPtr ptr(new PubSubData());
-  ptr->type = PUBLISH;
-  ptr->txnid = txnid;
-  ptr->topic = topic;
-  ptr->body = body;
-  ptr->callback = callback;
-  return ptr;
-}
-
-PubSubDataPtr PubSubData::forSubscribeRequest(long txnid, const std::string& subscriberid, const std::string& topic, const OperationCallbackPtr& callback, SubscribeRequest::CreateOrAttach mode) {
-  PubSubDataPtr ptr(new PubSubData());
-  ptr->type = SUBSCRIBE;
-  ptr->txnid = txnid;
-  ptr->subscriberid = subscriberid;
-  ptr->topic = topic;
-  ptr->callback = callback;
-  ptr->mode = mode;
-  return ptr;  
-}
-
-PubSubDataPtr PubSubData::forUnsubscribeRequest(long txnid, const std::string& subscriberid, const std::string& topic, const OperationCallbackPtr& callback) {
-  PubSubDataPtr ptr(new PubSubData());
-  ptr->type = UNSUBSCRIBE;
-  ptr->txnid = txnid;
-  ptr->subscriberid = subscriberid;
-  ptr->topic = topic;
-  ptr->callback = callback;
-  return ptr;  
-}
-
-PubSubDataPtr PubSubData::forConsumeRequest(long txnid, const std::string& subscriberid, const std::string& topic, const MessageSeqId msgid) {
-  PubSubDataPtr ptr(new PubSubData());
-  ptr->type = CONSUME;
-  ptr->txnid = txnid;
-  ptr->subscriberid = subscriberid;
-  ptr->topic = topic;
-  ptr->msgid = msgid;
-  return ptr;  
-}
-
-PubSubData::PubSubData() : request(NULL) {  
-}
-
-PubSubData::~PubSubData() {
-  if (request != NULL) {
-    delete request;
-  }
-}
-
-OperationType PubSubData::getType() const {
-  return type;
-}
-
-long PubSubData::getTxnId() const {
-  return txnid;
-}
-
-const std::string& PubSubData::getTopic() const {
-  return topic;
-}
-
-const std::string& PubSubData::getBody() const {
-  return body;
-}
-
-const PubSubRequest& PubSubData::getRequest() {
-  if (request != NULL) {
-    delete request;
-    request = NULL;
-  }
-  request = new Hedwig::PubSubRequest();
-  request->set_protocolversion(Hedwig::VERSION_ONE);
-  request->set_type(type);
-  request->set_txnid(txnid);
-  request->set_shouldclaim(shouldClaim);
-  request->set_topic(topic);
-    
-  if (type == PUBLISH) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debugStream() << "Creating publish request";
-    }
-    Hedwig::PublishRequest* pubreq = request->mutable_publishrequest();
-    Hedwig::Message* msg = pubreq->mutable_msg();
-    msg->set_body(body);
-  } else if (type == SUBSCRIBE) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debugStream() << "Creating subscribe request";
-    }
-
-    Hedwig::SubscribeRequest* subreq = request->mutable_subscriberequest();
-    subreq->set_subscriberid(subscriberid);
-    subreq->set_createorattach(mode);
-  } else if (type == CONSUME) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debugStream() << "Creating consume request";
-    }
-
-    Hedwig::ConsumeRequest* conreq = request->mutable_consumerequest();
-    conreq->set_subscriberid(subscriberid);
-    conreq->mutable_msgid()->CopyFrom(msgid);
-  } else if (type == UNSUBSCRIBE) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debugStream() << "Creating unsubscribe request";
-    }
-    
-    Hedwig::UnsubscribeRequest* unsubreq = request->mutable_unsubscriberequest();
-    unsubreq->set_subscriberid(subscriberid);    
-  } else {
-    LOG.errorStream() << "Tried to create a request message for the wrong type [" << type << "]";
-    throw UnknownRequestException();
-  }
-
-
-
-  return *request;
-}
-
-void PubSubData::setShouldClaim(bool shouldClaim) {
-  shouldClaim = shouldClaim;
-}
-
-void PubSubData::addTriedServer(HostAddress& h) {
-  triedservers.insert(h);
-}
-
-bool PubSubData::hasTriedServer(HostAddress& h) {
-  return triedservers.count(h) > 0;
-}
-
-void PubSubData::clearTriedServers() {
-  triedservers.clear();
-}
-
-OperationCallbackPtr& PubSubData::getCallback() {
-  return callback;
-}
-
-void PubSubData::setCallback(const OperationCallbackPtr& callback) {
-  this->callback = callback;
-}
-
-const std::string& PubSubData::getSubscriberId() const {
-  return subscriberid;
-}
-
-SubscribeRequest::CreateOrAttach PubSubData::getMode() const {
-  return mode;
-}
-
-ClientImplPtr& ClientImpl::Create(const Configuration& conf) {
-  ClientImpl* impl = new ClientImpl(conf);
-    if (LOG.isDebugEnabled()) {
+ClientImplPtr ClientImpl::Create(const Configuration& conf) {
+  ClientImplPtr impl(new ClientImpl(conf));
+  if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "Creating Clientimpl " << impl;
   }
+  impl->dispatcher.start();
 
-  return impl->selfptr;
+  return impl;
 }
 
 void ClientImpl::Destroy() {
@@ -317,7 +166,7 @@ void ClientImpl::Destroy() {
 
   shuttingDownFlag = true;
   for (ChannelMap::iterator iter = allchannels.begin(); iter != allchannels.end(); ++iter ) {
-    (*iter).second->kill();
+    (*iter)->kill();
   }  
   allchannels.clear();
   allchannels_lock.unlock();
@@ -331,12 +180,10 @@ void ClientImpl::Destroy() {
     delete publisher;
     publisher = NULL;
   }
-
-  selfptr = ClientImplPtr(); // clear the self pointer
 }
 
 ClientImpl::ClientImpl(const Configuration& conf) 
-  : selfptr(this), conf(conf), subscriber(NULL), publisher(NULL), counterobj(), shuttingDownFlag(false)
+  : conf(conf), subscriber(NULL), publisher(NULL), counterobj(), shuttingDownFlag(false)
 {
 }
 
@@ -352,7 +199,7 @@ SubscriberImpl& ClientImpl::getSubscriberImpl() {
   if (subscriber == NULL) {
     subscribercreate_lock.lock();
     if (subscriber == NULL) {
-      subscriber = new SubscriberImpl(selfptr);
+      subscriber = new SubscriberImpl(shared_from_this());
     }
     subscribercreate_lock.unlock();
   }
@@ -363,7 +210,7 @@ PublisherImpl& ClientImpl::getPublisherImpl() {
   if (publisher == NULL) { 
     publishercreate_lock.lock();
     if (publisher == NULL) {
-      publisher = new PublisherImpl(selfptr);
+      publisher = new PublisherImpl(shared_from_this());
     }
     publishercreate_lock.unlock();
   }
@@ -374,11 +221,11 @@ ClientTxnCounter& ClientImpl::counter() {
   return counterobj;
 }
 
-void ClientImpl::redirectRequest(DuplexChannel* channel, PubSubDataPtr& data, const PubSubResponse& response) {
+void ClientImpl::redirectRequest(const DuplexChannelPtr& channel, PubSubDataPtr& data, const PubSubResponsePtr& response) {
   HostAddress oldhost = channel->getHostAddress();
   data->addTriedServer(oldhost);
   
-  HostAddress h = HostAddress::fromString(response.statusmsg());
+  HostAddress h = HostAddress::fromString(response->statusmsg());
   if (data->hasTriedServer(h)) {
     LOG.errorStream() << "We've been told to try request [" << data->getTxnId() << "] with [" << h.getAddressString()<< "] by " << channel->getHostAddress().getAddressString() << " but we've already tried that. Failing operation";
     data->getCallback()->operationFailed(InvalidRedirectException());
@@ -393,21 +240,17 @@ void ClientImpl::redirectRequest(DuplexChannel* channel, PubSubDataPtr& data, co
   DuplexChannelPtr newchannel;
   try {
     if (data->getType() == SUBSCRIBE) {
-      SubscriberClientChannelHandlerPtr handler(new SubscriberClientChannelHandler(selfptr, this->getSubscriberImpl(), data));
-      ChannelHandlerPtr basehandler = handler;
-      
-      newchannel = createChannelForTopic(data->getTopic(), basehandler);
+      SubscriberClientChannelHandlerPtr handler(new SubscriberClientChannelHandler(shared_from_this(), 
+										   this->getSubscriberImpl(), data));
+      ChannelConnectCallbackPtr connectcb(new SubscribeConnectCallback(getSubscriberImpl(), data, handler));
+      newchannel = withNewChannel(data->getTopic(), handler, connectcb);
       handler->setChannel(newchannel);
-      
-      getSubscriberImpl().doSubscribe(newchannel, data, handler);
+    } else if (data->getType() == PUBLISH) {
+      ChannelConnectCallbackPtr connectcb(new PublishConnectCallback(getPublisherImpl(), data));
+      withChannel(data->getTopic(), connectcb);
     } else {
-      newchannel = getChannelForTopic(data->getTopic());
-      
-      if (data->getType() == PUBLISH) {
-	getPublisherImpl().doPublish(newchannel, data);
-      } else {
-	getSubscriberImpl().doUnsubscribe(newchannel, data);
-      }
+      ChannelConnectCallbackPtr connectcb(new UnsubscribeConnectCallback(getSubscriberImpl(), data));
+      withChannel(data->getTopic(), connectcb);
     }
   } catch (ShuttingDownException& e) {
     return; // no point in redirecting if we're shutting down
@@ -415,12 +258,14 @@ void ClientImpl::redirectRequest(DuplexChannel* channel, PubSubDataPtr& data, co
 }
 
 ClientImpl::~ClientImpl() {
+  dispatcher.stop();
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "deleting Clientimpl " << this;
   }
 }
 
-DuplexChannelPtr ClientImpl::createChannelForTopic(const std::string& topic, ChannelHandlerPtr& handler) {
+DuplexChannelPtr ClientImpl::withNewChannel(const std::string& topic, const ChannelHandlerPtr& handler, 
+					    const ChannelConnectCallbackPtr& callback) {
   // get the host address
   // create a channel to the host
   HostAddress addr = topic2host[topic];
@@ -428,16 +273,17 @@ DuplexChannelPtr ClientImpl::createChannelForTopic(const std::string& topic, Cha
     addr = HostAddress::fromString(conf.getDefaultServer());
   }
 
-  DuplexChannelPtr channel(new DuplexChannel(addr, conf, handler));
-  channel->connect();
+  DuplexChannelPtr channel(new DuplexChannel(dispatcher, addr, conf, handler));
 
   allchannels_lock.lock();
   if (shuttingDownFlag) {
     channel->kill();
     allchannels_lock.unlock();
-    throw ShuttingDownException();
+    callback->channelError(channel, ShuttingDownException());
   }
-  allchannels[channel.get()] = channel;
+  channel->connect(callback);
+
+  allchannels.insert(channel);
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "(create) All channels size: " << allchannels.size();
   }
@@ -446,17 +292,19 @@ DuplexChannelPtr ClientImpl::createChannelForTopic(const std::string& topic, Cha
   return channel;
 }
 
-DuplexChannelPtr ClientImpl::getChannelForTopic(const std::string& topic) {
+DuplexChannelPtr ClientImpl::withChannel(const std::string& topic, const ChannelConnectCallbackPtr& callback) {
   HostAddress addr = topic2host[topic];
   DuplexChannelPtr channel = host2channel[addr];
 
   if (channel.get() == 0 || addr.isNullHost()) {
-    ChannelHandlerPtr handler(new HedwigClientChannelHandler(selfptr));
-    channel = createChannelForTopic(topic, handler);
+    ChannelHandlerPtr handler(new HedwigClientChannelHandler(shared_from_this()));
+    channel = withNewChannel(topic, handler, callback);
     host2channel_lock.lock();
     host2channel[addr] = channel;
     host2channel_lock.unlock();
     return channel;
+  } else {
+    callback->channelConnected(channel);
   }
 
   return channel;
@@ -478,7 +326,7 @@ bool ClientImpl::shuttingDown() const {
    This does not delete the channel. Some publishers or subscribers will still hold it and will be errored
    when they try to do anything with it. 
 */
-void ClientImpl::channelDied(DuplexChannel* channel) {
+void ClientImpl::channelDied(const DuplexChannelPtr& channel) {
   if (shuttingDownFlag) {
     return;
   }
@@ -502,4 +350,12 @@ void ClientImpl::channelDied(DuplexChannel* channel) {
   host2topics_lock.unlock();
   host2channel_lock.unlock();
   topic2host_lock.unlock();
+}
+
+const Configuration& ClientImpl::getConfiguration() {
+  return conf;
+}
+
+boost::asio::io_service& ClientImpl::getService() {
+  return dispatcher.getService();
 }

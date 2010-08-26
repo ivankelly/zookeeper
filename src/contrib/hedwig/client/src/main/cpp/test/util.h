@@ -70,6 +70,19 @@ public:
     return address;
   }
   
+  virtual int getReconnectSubscribeRetryWaitTime() const {
+    return 5000;
+  }
+
+  virtual int getMessageConsumeRetryWaitTime() const {
+    return 5000;
+  }
+
+  virtual int getSubscriberConsumeRetryWaitTime() const {
+    return 5000;
+  }
+
+  
 private:
   HedwigTest::TestServerPtr server;
   const std::string address;

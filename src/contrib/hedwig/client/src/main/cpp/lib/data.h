@@ -25,6 +25,7 @@
 #include <pthread.h>
 #include <tr1/unordered_set>
 #include "util.h"
+#include <boost/shared_ptr.hpp>
 
 namespace Hedwig {
   /**
@@ -42,7 +43,7 @@ namespace Hedwig {
   };
 
   class PubSubData;
-  typedef std::tr1::shared_ptr<PubSubData> PubSubDataPtr;
+  typedef boost::shared_ptr<PubSubData> PubSubDataPtr;
 
   /**
      Data structure to hold information about requests and build request messages.
@@ -63,6 +64,7 @@ namespace Hedwig {
     const std::string& getSubscriberId() const;
     const std::string& getTopic() const;
     const std::string& getBody() const;
+    const MessageSeqId getMessageSeqId() const;
 
     void setShouldClaim(bool shouldClaim);
 
@@ -87,9 +89,9 @@ namespace Hedwig {
     OperationCallbackPtr callback;
     SubscribeRequest::CreateOrAttach mode;
     MessageSeqId msgid;
-    std::tr1::unordered_set<HostAddress> triedservers;
+    std::tr1::unordered_set<HostAddress, HostAddressHash > triedservers;
   };
-  
 
+  typedef boost::shared_ptr<PubSubResponse> PubSubResponsePtr;
 };
 #endif

@@ -22,12 +22,17 @@
 #include <hedwig/client.h>
 #include <hedwig/protocol.h>
 
+#include <boost/asio.hpp>
+#include <boost/shared_ptr.hpp>
+#include <boost/enable_shared_from_this.hpp>
+
 #include <tr1/unordered_map>
 #include <list>
+
 #include "util.h"
-#include <pthread.h>
 #include "channel.h"
 #include "data.h"
+#include "eventdispatcher.h"
 
 namespace Hedwig {
   class SyncOperationCallback : public OperationCallback, public WaitConditionBase {
@@ -54,15 +59,15 @@ namespace Hedwig {
 
   class HedwigClientChannelHandler : public ChannelHandler {
   public:
-    HedwigClientChannelHandler(ClientImplPtr& client);
+    HedwigClientChannelHandler(const ClientImplPtr& client);
     
-    virtual void messageReceived(DuplexChannel* channel, const PubSubResponse& m);
-    virtual void channelConnected(DuplexChannel* channel);
-    virtual void channelDisconnected(DuplexChannel* channel, const std::exception& e);
-    virtual void exceptionOccurred(DuplexChannel* channel, const std::exception& e);
+    virtual void messageReceived(const DuplexChannelPtr& channel, const PubSubResponsePtr& m);
+    virtual void channelConnected(const DuplexChannelPtr& channel);
+    virtual void channelDisconnected(const DuplexChannelPtr& channel, const std::exception& e);
+    virtual void exceptionOccurred(const DuplexChannelPtr& channel, const std::exception& e);
     
   protected:
-    ClientImplPtr client;
+    const ClientImplPtr client;
   };
   
   class PublisherImpl;
@@ -71,9 +76,9 @@ namespace Hedwig {
   /**
      Implementation of the hedwig client. This class takes care of globals such as the topic->host map and the transaction id counter.
   */
-  class ClientImpl {
+  class ClientImpl : public boost::enable_shared_from_this<ClientImpl> {
   public:
-    static ClientImplPtr& Create(const Configuration& conf);
+    static ClientImplPtr Create(const Configuration& conf);
     void Destroy();
 
     Subscriber& getSubscriber();
@@ -81,47 +86,53 @@ namespace Hedwig {
 
     ClientTxnCounter& counter();
 
-    void redirectRequest(DuplexChannel* channel, PubSubDataPtr& data, const PubSubResponse& response);
+    void redirectRequest(const DuplexChannelPtr& channel, PubSubDataPtr& data, const PubSubResponsePtr& response);
 
     const HostAddress& getHostForTopic(const std::string& topic);
 
-    DuplexChannelPtr createChannelForTopic(const std::string& topic, ChannelHandlerPtr& handler);
-    DuplexChannelPtr getChannelForTopic(const std::string& topic);
-    
+    //DuplexChannelPtr getChannelForTopic(const std::string& topic, OperationCallback& callback);
+    //DuplexChannelPtr createChannelForTopic(const std::string& topic, ChannelHandlerPtr& handler, OperationCallback& callback);
+    DuplexChannelPtr withNewChannel(const std::string& topic, const ChannelHandlerPtr& handler, const ChannelConnectCallbackPtr& callback);    
+    DuplexChannelPtr withChannel(const std::string& topic, const ChannelConnectCallbackPtr& callback);
+
     void setHostForTopic(const std::string& topic, const HostAddress& host);
 
-    void setChannelForHost(const HostAddress& address, DuplexChannel* channel);
-    void channelDied(DuplexChannel* channel);
+    void setChannelForHost(const HostAddress& address, const DuplexChannelPtr& channel);
+    void channelDied(const DuplexChannelPtr& channel);
     bool shuttingDown() const;
     
     SubscriberImpl& getSubscriberImpl();
     PublisherImpl& getPublisherImpl();
 
+    const Configuration& getConfiguration();
+    boost::asio::io_service& getService();
+
     ~ClientImpl();
   private:
     ClientImpl(const Configuration& conf);
 
-    ClientImplPtr selfptr;
-
     const Configuration& conf;
+
+    Mutex publishercreate_lock;
     PublisherImpl* publisher;
+
+    Mutex subscribercreate_lock;
     SubscriberImpl* subscriber;
+
     ClientTxnCounter counterobj;
 
-
-    typedef std::tr1::unordered_multimap<HostAddress, std::string> Host2TopicsMap;
+    EventDispatcher dispatcher;
+    
+    typedef std::tr1::unordered_multimap<HostAddress, std::string, HostAddressHash > Host2TopicsMap;
     Host2TopicsMap host2topics;
     Mutex host2topics_lock;
 
-    std::tr1::unordered_map<HostAddress, DuplexChannelPtr> host2channel;
+    std::tr1::unordered_map<HostAddress, DuplexChannelPtr, HostAddressHash > host2channel;
     Mutex host2channel_lock;
     std::tr1::unordered_map<std::string, HostAddress> topic2host;
     Mutex topic2host_lock;
 
-    Mutex publishercreate_lock;
-    Mutex subscribercreate_lock;
-
-    typedef std::tr1::unordered_map<DuplexChannel*, DuplexChannelPtr> ChannelMap;
+    typedef std::tr1::unordered_set<DuplexChannelPtr, DuplexChannelPtrHash > ChannelMap;
     ChannelMap allchannels;
     Mutex allchannels_lock;
 
