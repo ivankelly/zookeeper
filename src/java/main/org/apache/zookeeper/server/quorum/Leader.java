@@ -31,14 +31,13 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.jute.BinaryOutputArchive;
 import org.apache.log4j.Logger;
-import org.apache.zookeeper.common.fd.FailureDetector;
 import org.apache.zookeeper.server.FinalRequestProcessor;
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.RequestProcessor;
@@ -115,9 +114,6 @@ public class Leader {
         }        
         synchronized (learners) {
             learners.remove(peer);
-        }
-        synchronized (self.leanersFd) {
-            self.leanersFd.release(String.valueOf(peer.sid));
         }
     }
 
@@ -341,19 +337,13 @@ public class Leader {
             //synchronized (this) {
             //    notifyAll();
             //}
-            
-            long lastTick = -1;
+            // We ping twice a tick, so we only update the tick every other
+            // iteration
+            boolean tickSkip = true;
     
             while (true) {
-                //A smaller scheduling interval permits failure detection 
-                //to determine with higher accuracy when pings are to sent
-                Thread.sleep(self.tickTime / 10);
-                
-                long now = System.currentTimeMillis();
-                boolean tick = (lastTick < 0) || (now - lastTick >= self.tickTime);
-                
-                if (tick) {
-                    lastTick = now;
+                Thread.sleep(self.tickTime / 2);
+                if (!tickSkip) {
                     self.tick++;
                 }
                 int syncedCount = 0;
@@ -361,31 +351,16 @@ public class Leader {
                 
                 // lock on the followers when we use it.
                 syncedSet.add(self.getId());
-                
-                
-                List<String> failedLearners = null;
-                List<String> learnersToPing = null;
-                
-                synchronized (self.leanersFd) {
-                    failedLearners = self.leanersFd.getFailedObjects(now);
-                    learnersToPing = self.leanersFd.getObjectsToPing(now);
-                }
-                
                 synchronized (learners) {
                     for (LearnerHandler f : learners) {
-                        if (f.isAlive() && !failedLearners.contains(
-                                String.valueOf(f.sid))) {
+                        if (f.synced()) {
                             syncedCount++;
                             syncedSet.add(f.getSid());
                         }
-                        
-                        // By default, we ping twice a tick.
-                        if (learnersToPing.contains(String.valueOf(f.sid))) {
                         f.ping();
                     }
                 }
-                }
-              if (tick && !self.getQuorumVerifier().containsQuorum(syncedSet)) {
+              if (!tickSkip && !self.getQuorumVerifier().containsQuorum(syncedSet)) {
                 //if (!tickSkip && syncedCount < self.quorumPeers.size() / 2) {
                     // Lost quorum, shutdown
                   // TODO: message is wrong unless majority quorums used
@@ -395,6 +370,7 @@ public class Leader {
                     // the leader goes to looking
                     return;
               } 
+              tickSkip = !tickSkip;
             }
         } finally {
             zk.unregisterJMX(this);
@@ -752,10 +728,6 @@ public class Leader {
         }
                 
         return lastProposed;
-    }
-
-    public FailureDetector getLeanersFd() {
-        return self.leanersFd;
     }
 
 }

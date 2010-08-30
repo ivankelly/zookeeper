@@ -33,9 +33,7 @@ import java.util.Map.Entry;
 
 import org.apache.log4j.Logger;
 import org.apache.log4j.MDC;
-import org.apache.zookeeper.common.fd.FailureDetector;
-import org.apache.zookeeper.common.fd.FailureDetectorFactory;
-import org.apache.zookeeper.common.fd.SlicedHeartbeatFailureDetector;
+
 import org.apache.zookeeper.server.ZooKeeperServer;
 import org.apache.zookeeper.server.quorum.QuorumPeer.LearnerType;
 import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
@@ -44,11 +42,7 @@ import org.apache.zookeeper.server.quorum.flexible.QuorumMaj;
 import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
 
 public class QuorumPeerConfig {
-    
     private static final Logger LOG = Logger.getLogger(QuorumPeerConfig.class);
-
-    private static final String LEARNERS_FD_OPT = "learnersFD";
-    private static final String SESSIONS_FD_OPT = "sessionsFD";
 
     protected InetSocketAddress clientPortAddress;
     protected String dataDir;
@@ -60,10 +54,6 @@ public class QuorumPeerConfig {
     /** defaults to -1 if not set explicitly */
     protected int maxSessionTimeout = -1;
 
-    protected FailureDetector sessionsFD;
-    
-    protected FailureDetector learnersFD;
-    
     protected int initLimit;
     protected int syncLimit;
     protected int electionAlg = 3;
@@ -133,12 +123,6 @@ public class QuorumPeerConfig {
     throws IOException, ConfigException {
         int clientPort = 0;
         String clientPortAddress = null;
-        
-        String sessionsFDName = null;
-        String learnersFDName = null;
-        Map<String, String> sessionsFDOptions = new HashMap<String, String>();
-        Map<String, String> learnersFDOptions = new HashMap<String, String>();
-        
         for (Entry<Object, Object> entry : zkProp.entrySet()) {
             String key = entry.getKey().toString().trim();
             String value = entry.getValue().toString().trim();
@@ -152,10 +136,6 @@ public class QuorumPeerConfig {
                 clientPortAddress = value.trim();
             } else if (key.equals("tickTime")) {
                 tickTime = Integer.parseInt(value);
-            } else if (key.equals(SESSIONS_FD_OPT)) {
-                sessionsFDName = value;
-            } else if (key.equals(LEARNERS_FD_OPT)) {
-                learnersFDName = value;
             } else if (key.equals("maxClientCnxns")) {
                 maxClientCnxns = Integer.parseInt(value);
             } else if (key.equals("minSessionTimeout")) {
@@ -230,10 +210,6 @@ public class QuorumPeerConfig {
                 int dot = key.indexOf('.');
                 long sid = Long.parseLong(key.substring(dot + 1));
                 serverWeight.put(sid, Long.parseLong(value));
-            } else if (key.startsWith(SESSIONS_FD_OPT + ".")) {
-                sessionsFDOptions.put(key, value);
-            } else if (key.startsWith(LEARNERS_FD_OPT + ".")) {
-                learnersFDOptions.put(key, value);
             } else {
                 System.setProperty("zookeeper." + key, value);
             }
@@ -267,13 +243,6 @@ public class QuorumPeerConfig {
             throw new IllegalArgumentException(
                     "minSessionTimeout must not be larger than maxSessionTimeout");
         }
-            
-        this.sessionsFD = createFailureDetector(sessionsFDName, 
-                sessionsFDOptions, SESSIONS_FD_OPT);
-            
-        this.learnersFD = createFailureDetector(learnersFDName, 
-                learnersFDOptions, LEARNERS_FD_OPT);
-            
         if (servers.size() > 1) {
             if (initLimit == 0) {
                 throw new IllegalArgumentException("initLimit is not set");
@@ -359,26 +328,6 @@ public class QuorumPeerConfig {
         }
     }
 
-    private FailureDetector createFailureDetector(String fDName,
-            Map<String, String> fDOptions, String fDPrefix) {
-        if (fDName == null) {
-            return new SlicedHeartbeatFailureDetector(tickTime);
-        } else {
-            
-            Map<String,String> fdOptionsPrx = new HashMap<String,String>();
-            String prefix = fDPrefix + "." + fDName + ".";
-            
-            for (Entry<String, String> entry : fDOptions.entrySet()) {
-                if (entry.getKey().startsWith(prefix)) {
-                    String key = entry.getKey().substring(prefix.length());
-                    fdOptionsPrx.put(key, entry.getValue());
-                }
-            }
-            
-            return new FailureDetectorFactory().createFd(fDName, fdOptionsPrx);
-        }
-    }
-
     public InetSocketAddress getClientPortAddress() { return clientPortAddress; }
     public String getDataDir() { return dataDir; }
     public String getDataLogDir() { return dataLogDir; }
@@ -391,14 +340,6 @@ public class QuorumPeerConfig {
     public int getSyncLimit() { return syncLimit; }
     public int getElectionAlg() { return electionAlg; }
     public int getElectionPort() { return electionPort; }    
-    
-    public FailureDetector getSessionsFailureDetector() {
-        return sessionsFD;
-    };
-    
-    public FailureDetector getLearnersFailureDetector() {
-        return learnersFD;
-    };
     
     public QuorumVerifier getQuorumVerifier() {   
         return quorumVerifier;

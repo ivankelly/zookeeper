@@ -46,21 +46,12 @@ public interface SessionTracker {
     void addSession(long id, int to);
 
     /**
-     * Received a message application from the client
      * @param sessionId
      * @param sessionTimeout
      * @return false if session is no longer active
      */
     boolean touchSession(long sessionId, int sessionTimeout);
 
-    /**
-     * Received a ping from the client
-     * @param sessionId
-     * @param sessionTimeout
-     * @return false if session is no longer active
-     */
-    boolean pingSession(long sessionId, int sessionTimeout);
-    
     /**
      * 
      */

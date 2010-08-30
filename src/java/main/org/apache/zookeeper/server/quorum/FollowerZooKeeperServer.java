@@ -59,7 +59,7 @@ public class FollowerZooKeeperServer extends LearnerZooKeeperServer {
      */
     FollowerZooKeeperServer(FileTxnSnapLog logFactory,QuorumPeer self,
             DataTreeBuilder treeBuilder, ZKDatabase zkDb) throws IOException {
-        super(logFactory, self.tickTime, self.sessionsFd, self.minSessionTimeout,
+        super(logFactory, self.tickTime, self.minSessionTimeout,
                 self.maxSessionTimeout, treeBuilder, zkDb, self);
         this.pendingSyncs = new ConcurrentLinkedQueue<Request>();
     }
