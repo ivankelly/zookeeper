@@ -17,7 +17,7 @@ if [ ! -e $HEDWIGSERVERTESTS ]; then
     exit 1;
 fi
 
-export CP=$HEDWIGJAR:$HEDWIGSERVERTESTS
+export CP=.:$HEDWIGJAR:$HEDWIGSERVERTESTS
 
 case "$1" in
     start)

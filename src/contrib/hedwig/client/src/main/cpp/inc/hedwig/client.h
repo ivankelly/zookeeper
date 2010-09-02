@@ -39,6 +39,7 @@ namespace Hedwig {
     virtual int getMessageConsumeRetryWaitTime() const = 0;
     virtual int getSubscriberConsumeRetryWaitTime() const = 0;
     virtual const std::string& getDefaultServer() const = 0;    
+    virtual int getMaxMessageQueueSize() const = 0;
   };
 
   /** 

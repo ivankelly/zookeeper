@@ -60,35 +60,6 @@ namespace Hedwig {
     struct sockaddr_in socket_addr;
   };
 
-  class DuplexChannel;  
-  
-  class Mutex {
-  public:
-    Mutex();
-    ~Mutex();
-    
-    void lock();
-    void unlock();
-  private:
-    pthread_mutex_t mutex;
-  };
-
-  class WaitConditionBase {
-  public:
-    WaitConditionBase();
-    virtual ~WaitConditionBase();
-    
-    void wait(); 
-    void lock();
-    void signalAndUnlock();
-
-    virtual bool isTrue() = 0;
-  private:
-
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;    
-  };
-
   /**
      Hash a host address. Takes the least significant 16-bits of the address and the 16-bits of the
      port and packs them into one 32-bit number. While collisons are theoretically very possible, they

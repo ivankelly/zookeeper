@@ -60,6 +60,8 @@ void EventDispatcher::stop() {
   delete dummy_work;
   dummy_work = NULL;
   
+  service.stop();
+  
   t->join();
   delete t;
   t = NULL;
@@ -67,7 +69,6 @@ void EventDispatcher::stop() {
 
 EventDispatcher::~EventDispatcher() {
   delete dummy_work;
-  service.stop();
 }
 
 boost::asio::io_service& EventDispatcher::getService() {

@@ -28,10 +28,14 @@
 #include <tr1/memory>
 #include <tr1/unordered_map>
 
+#include <google/protobuf/io/zero_copy_stream_impl.h>
+
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/shared_mutex.hpp>
 
 namespace Hedwig {
   class ChannelException : public std::exception { };
@@ -40,6 +44,7 @@ namespace Hedwig {
   class ChannelConnectException : public ChannelException {};
   class CannotCreateSocketException : public ChannelConnectException {};
   class ChannelSetupException : public ChannelConnectException {};
+  class ChannelNotConnectedException : public ChannelConnectException {};
 
   class ChannelDiedException : public ChannelException {};
 
@@ -73,10 +78,13 @@ namespace Hedwig {
 
   class DuplexChannel : public boost::enable_shared_from_this<DuplexChannel> {
   public:
-    DuplexChannel(EventDispatcher& dispatcher, const HostAddress& addr, const Configuration& cfg, const ChannelHandlerPtr& handler);
-    static void connectCallbackHandler(DuplexChannelPtr channel, ChannelConnectCallbackPtr callback, 
-			       const boost::system::error_code& error);
+    DuplexChannel(EventDispatcher& dispatcher, const HostAddress& addr, 
+		  const Configuration& cfg, const ChannelHandlerPtr& handler);
+    static void connectCallbackHandler(DuplexChannelPtr channel, 
+				       ChannelConnectCallbackPtr callback, 
+				       const boost::system::error_code& error);
     void connect(const ChannelConnectCallbackPtr& callback);
+    void onConnect(const ChannelConnectCallbackPtr& callback);
 
     static void writeCallbackHandler(DuplexChannelPtr channel, OperationCallbackPtr callback, 
 				     const boost::system::error_code& error, 
@@ -89,7 +97,8 @@ namespace Hedwig {
     PubSubDataPtr retrieveTransaction(long txnid);
     void failAllTransactions();
 
-    static void sizeReadCallbackHandler(DuplexChannelPtr channel, const boost::system::error_code& error, 
+    static void sizeReadCallbackHandler(DuplexChannelPtr channel, 
+					const boost::system::error_code& error, 
 					std::size_t bytes_transferred);
     static void messageReadCallbackHandler(DuplexChannelPtr channel, std::size_t messagesize, 
 					   const boost::system::error_code& error, 
@@ -105,6 +114,10 @@ namespace Hedwig {
 
     ~DuplexChannel();
   private:
+    enum State { UNINITIALISED, CONNECTING, CONNECTED, DEAD };
+
+    void setState(State s);
+
     EventDispatcher& dispatcher;
 
     HostAddress address;
@@ -112,20 +125,29 @@ namespace Hedwig {
 
     boost::asio::ip::tcp::socket socket;
     boost::asio::streambuf in_buf;
+    std::istream instream_base;
+    google::protobuf::io::IstreamInputStream instream;
+
     boost::asio::streambuf out_buf;
     
-    
-    enum State { UNINITIALISED, CONNECTING, CONNECTED, DEAD };
+    typedef std::pair<PubSubRequest, OperationCallbackPtr> WriteRequest;
+    boost::mutex write_lock;
+    std::deque<>;
+
     State state;
-    
+    boost::shared_mutex state_lock;
+
+    bool receiving;
+    boost::mutex receiving_lock;
+
+    boost::mutex connectQueue_lock;
+    std::deque<ChannelConnectCallbackPtr> connectQueue;
+
     typedef std::tr1::unordered_map<long, PubSubDataPtr> TransactionMap;
 
-    /*    std::deque<ChannelConnectCallbackPtr> connectCallbacks;
-	  Mutex connectCallbacks_lock;*/
-
     TransactionMap txnid2data;
-    Mutex txnid2data_lock;
-    Mutex destruction_lock;
+    boost::mutex txnid2data_lock;
+    boost::mutex destruction_lock;
   };
   
 

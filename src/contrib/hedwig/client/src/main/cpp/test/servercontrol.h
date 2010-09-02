@@ -21,10 +21,11 @@
 
 #include <tr1/memory>
 #include <exception>
+#include <boost/thread/mutex.hpp>
 #include "../lib/util.h"
 
 namespace HedwigTest {
-    const int DEFAULT_CONTROLSERVER_PORT = 5672;
+  const int DEFAULT_CONTROLSERVER_PORT = 5672;
 
   class TestException : public std::exception {};
   class CantConnectToServerControlDaemonException : public TestException {};
@@ -57,7 +58,7 @@ namespace HedwigTest {
 
   public:
     int socketfd;
-    Hedwig::Mutex socketlock;
+    boost::mutex socketlock;
   };
 };
 

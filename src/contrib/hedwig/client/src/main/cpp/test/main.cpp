@@ -23,14 +23,24 @@
 #include <log4cpp/PropertyConfigurator.hh>
 #include <log4cpp/Category.hh>
 #include "servercontrol.h"
+#include "util.h"
 
 #include <cppunit/extensions/TestFactoryRegistry.h>
 #include <cppunit/ui/text/TextTestRunner.h>
 
+#include <cppunit/TextTestProgressListener.h>
+#include <cppunit/TestResult.h>
+
+HedwigCppTextTestProgressListener gprogress;
+
 int main( int argc, char **argv)
 {
   try {
-    log4cpp::PropertyConfigurator::configure("../log4cpp.conf");
+    if (getenv("LOG4CPP_CONF") == NULL) {
+      std::cerr << "Set LOG4CPP_CONF in your environment to get logging." << std::endl;
+    } else {
+      log4cpp::PropertyConfigurator::configure(getenv("LOG4CPP_CONF"));
+    }
   } catch (log4cpp::ConfigureFailure &e) {
     std::cerr << "log4cpp configuration failure while loading : " << e.what() << std::endl;
   } catch (std::exception &e) {
@@ -55,6 +65,9 @@ int main( int argc, char **argv)
     
     runner.addTest( registry.makeTest() );
   }
+  
+  runner.eventManager().addListener( &gprogress );
+
   int ret =  runner.run(testPath);
   google::protobuf::ShutdownProtobufLibrary();
   

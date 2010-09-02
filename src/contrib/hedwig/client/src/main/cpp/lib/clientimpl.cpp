@@ -26,30 +26,38 @@ static log4cpp::Category &LOG = log4cpp::Category::getInstance("hedwig."__FILE__
 
 using namespace Hedwig;
 
+void SyncOperationCallback::wait() {
+  boost::unique_lock<boost::mutex> lock(mut);
+  while(response==PENDING) {
+    cond.wait(lock);
+  }
+}
+
 void SyncOperationCallback::operationComplete() {
-  lock();
-  response = SUCCESS;
-  signalAndUnlock();
+  {
+    boost::lock_guard<boost::mutex> lock(mut);
+    response = SUCCESS;
+  }
+  cond.notify_all();
 }
 
 void SyncOperationCallback::operationFailed(const std::exception& exception) {
-  lock();
-  if (typeid(exception) == typeid(ChannelConnectException)) {
-    response = NOCONNECT;
-  } else if (typeid(exception) == typeid(ServiceDownException)) {
-    response = SERVICEDOWN;
-  } else if (typeid(exception) == typeid(AlreadySubscribedException)) {
-    response = ALREADY_SUBSCRIBED;
-  } else if (typeid(exception) == typeid(NotSubscribedException)) {
-    response = NOT_SUBSCRIBED;
-  } else {
-    response = UNKNOWN;
-  }
-  signalAndUnlock();
-}
+  {
+    boost::lock_guard<boost::mutex> lock(mut);
     
-bool SyncOperationCallback::isTrue() {
-  return response != PENDING;
+    if (typeid(exception) == typeid(ChannelConnectException)) {
+      response = NOCONNECT;
+    } else if (typeid(exception) == typeid(ServiceDownException)) {
+      response = SERVICEDOWN;
+    } else if (typeid(exception) == typeid(AlreadySubscribedException)) {
+      response = ALREADY_SUBSCRIBED;
+    } else if (typeid(exception) == typeid(NotSubscribedException)) {
+      response = NOT_SUBSCRIBED;
+    } else {
+      response = UNKNOWN;
+    }
+  }
+  cond.notify_all();
 }
 
 void SyncOperationCallback::throwExceptionIfNeeded() {
@@ -79,7 +87,8 @@ HedwigClientChannelHandler::HedwigClientChannelHandler(const ClientImplPtr& clie
 }
 
 void HedwigClientChannelHandler::messageReceived(const DuplexChannelPtr& channel, const PubSubResponsePtr& m) {
-  LOG.debugStream() << "Message received";
+  LOG.debugStream() << "Message received txnid(" << m->txnid() << ") status(" 
+		    << m->statuscode() << ")";
   if (m->has_message()) {
     LOG.errorStream() << "Subscription response, ignore for now";
     return;
@@ -91,7 +100,6 @@ void HedwigClientChannelHandler::messageReceived(const DuplexChannelPtr& channel
      palming it off to someone else */
 
   if (data == NULL) {
-    LOG.errorStream() << "Transaction " << m->txnid() << " doesn't exist in channel " << channel;
     return;
   }
 
@@ -142,9 +150,10 @@ Increment the transaction counter and return the new value.
 @returns the next transaction id
 */
 long ClientTxnCounter::next() {  // would be nice to remove lock from here, look more into it
-  mutex.lock();
+  boost::lock_guard<boost::mutex> lock(mutex);
+
   long next= ++counter; 
-  mutex.unlock();
+
   return next;
 }
 
@@ -162,14 +171,18 @@ void ClientImpl::Destroy() {
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "destroying Clientimpl " << this;
   }
-  allchannels_lock.lock();
 
-  shuttingDownFlag = true;
-  for (ChannelMap::iterator iter = allchannels.begin(); iter != allchannels.end(); ++iter ) {
-    (*iter)->kill();
-  }  
-  allchannels.clear();
-  allchannels_lock.unlock();
+  dispatcher.stop();
+  {
+    boost::lock_guard<boost::mutex> lock(allchannels_lock);
+    
+    shuttingDownFlag = true;
+    for (ChannelMap::iterator iter = allchannels.begin(); iter != allchannels.end(); ++iter ) {
+      (*iter)->kill();
+    }  
+    allchannels.clear();
+  }
+
   /* destruction of the maps will clean up any items they hold */
   
   if (subscriber != NULL) {
@@ -197,22 +210,20 @@ Publisher& ClientImpl::getPublisher() {
     
 SubscriberImpl& ClientImpl::getSubscriberImpl() {
   if (subscriber == NULL) {
-    subscribercreate_lock.lock();
+    boost::lock_guard<boost::mutex> lock(subscribercreate_lock);
     if (subscriber == NULL) {
       subscriber = new SubscriberImpl(shared_from_this());
     }
-    subscribercreate_lock.unlock();
   }
   return *subscriber;
 }
 
 PublisherImpl& ClientImpl::getPublisherImpl() {
   if (publisher == NULL) { 
-    publishercreate_lock.lock();
+    boost::lock_guard<boost::mutex> lock(publishercreate_lock);
     if (publisher == NULL) {
       publisher = new PublisherImpl(shared_from_this());
     }
-    publishercreate_lock.unlock();
   }
   return *publisher;
 }
@@ -227,12 +238,15 @@ void ClientImpl::redirectRequest(const DuplexChannelPtr& channel, PubSubDataPtr&
   
   HostAddress h = HostAddress::fromString(response->statusmsg());
   if (data->hasTriedServer(h)) {
-    LOG.errorStream() << "We've been told to try request [" << data->getTxnId() << "] with [" << h.getAddressString()<< "] by " << channel->getHostAddress().getAddressString() << " but we've already tried that. Failing operation";
+    LOG.errorStream() << "We've been told to try request [" << data->getTxnId() << "] with [" 
+		      << h.getAddressString()<< "] by " << oldhost.getAddressString() 
+		      << " but we've already tried that. Failing operation";
     data->getCallback()->operationFailed(InvalidRedirectException());
     return;
   }
   if (LOG.isDebugEnabled()) {
-    LOG.debugStream() << "We've been told  [" << data->getTopic() << "] is on [" << h.getAddressString() << "] by [" << oldhost.getAddressString() << "]. Redirecting request " << data->getTxnId();
+    LOG.debugStream() << "We've been told  [" << data->getTopic() << "] is on [" << h.getAddressString() 
+		      << "] by [" << oldhost.getAddressString() << "]. Redirecting request " << data->getTxnId();
   }
   data->setShouldClaim(true);
 
@@ -258,7 +272,6 @@ void ClientImpl::redirectRequest(const DuplexChannelPtr& channel, PubSubDataPtr&
 }
 
 ClientImpl::~ClientImpl() {
-  dispatcher.stop();
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "deleting Clientimpl " << this;
   }
@@ -271,15 +284,16 @@ DuplexChannelPtr ClientImpl::withNewChannel(const std::string& topic, const Chan
   HostAddress addr = topic2host[topic];
   if (addr.isNullHost()) {
     addr = HostAddress::fromString(conf.getDefaultServer());
+    setHostForTopic(topic, addr);
   }
 
   DuplexChannelPtr channel(new DuplexChannel(dispatcher, addr, conf, handler));
 
-  allchannels_lock.lock();
+  boost::lock_guard<boost::mutex> lock(allchannels_lock);
   if (shuttingDownFlag) {
     channel->kill();
-    allchannels_lock.unlock();
     callback->channelError(channel, ShuttingDownException());
+    return channel;
   }
   channel->connect(callback);
 
@@ -287,33 +301,39 @@ DuplexChannelPtr ClientImpl::withNewChannel(const std::string& topic, const Chan
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "(create) All channels size: " << allchannels.size();
   }
-  allchannels_lock.unlock();
 
   return channel;
 }
 
 DuplexChannelPtr ClientImpl::withChannel(const std::string& topic, const ChannelConnectCallbackPtr& callback) {
   HostAddress addr = topic2host[topic];
+  if (addr.isNullHost()) {
+    addr = HostAddress::fromString(conf.getDefaultServer());
+    setHostForTopic(topic, addr);
+  }  
   DuplexChannelPtr channel = host2channel[addr];
 
-  if (channel.get() == 0 || addr.isNullHost()) {
+  if (channel.get() == 0) {
+    if (LOG.isDebugEnabled()) {
+      LOG.debugStream() << " No channel for topic, creating new channel.get() " << channel.get() << " addr " << addr.getAddressString();
+    }
     ChannelHandlerPtr handler(new HedwigClientChannelHandler(shared_from_this()));
     channel = withNewChannel(topic, handler, callback);
-    host2channel_lock.lock();
+
+    boost::lock_guard<boost::mutex> lock(host2channel_lock);
     host2channel[addr] = channel;
-    host2channel_lock.unlock();
+
     return channel;
   } else {
-    callback->channelConnected(channel);
+    channel->onConnect(callback);
   }
 
   return channel;
 }
 
 void ClientImpl::setHostForTopic(const std::string& topic, const HostAddress& host) {
-  topic2host_lock.lock();
+  boost::lock_guard<boost::mutex> lock(topic2host_lock);
   topic2host[topic] = host;
-  topic2host_lock.unlock();
 }
 
 bool ClientImpl::shuttingDown() const {
@@ -331,10 +351,10 @@ void ClientImpl::channelDied(const DuplexChannelPtr& channel) {
     return;
   }
 
-  host2topics_lock.lock();
-  host2channel_lock.lock();
-  topic2host_lock.lock();
-  allchannels_lock.lock();
+  boost::lock_guard<boost::mutex> h2tlock(host2topics_lock);
+  boost::lock_guard<boost::mutex> h2clock(host2channel_lock);
+  boost::lock_guard<boost::mutex> t2hlock(topic2host_lock);
+  boost::lock_guard<boost::mutex> aclock(allchannels_lock);
   // get host
   HostAddress addr = channel->getHostAddress();
   
@@ -345,11 +365,6 @@ void ClientImpl::channelDied(const DuplexChannelPtr& channel) {
   host2channel.erase(addr);
 
   allchannels.erase(channel); // channel should be deleted here
-
-  allchannels_lock.unlock();
-  host2topics_lock.unlock();
-  host2channel_lock.unlock();
-  topic2host_lock.unlock();
 }
 
 const Configuration& ClientImpl::getConfiguration() {

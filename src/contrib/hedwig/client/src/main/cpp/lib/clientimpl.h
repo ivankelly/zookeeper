@@ -25,6 +25,8 @@
 #include <boost/asio.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/condition_variable.hpp>
 
 #include <tr1/unordered_map>
 #include <list>
@@ -35,14 +37,13 @@
 #include "eventdispatcher.h"
 
 namespace Hedwig {
-  class SyncOperationCallback : public OperationCallback, public WaitConditionBase {
+  class SyncOperationCallback : public OperationCallback {
   public:
     SyncOperationCallback() : response(PENDING) {}
     virtual void operationComplete();
     virtual void operationFailed(const std::exception& exception);
     
-    virtual bool isTrue();
-
+    void wait();
     void throwExceptionIfNeeded();
     
   private:
@@ -55,6 +56,9 @@ namespace Hedwig {
       ALREADY_SUBSCRIBED,
       UNKNOWN
     } response;
+    
+    boost::condition_variable cond;
+    boost::mutex mut;
   };
 
   class HedwigClientChannelHandler : public ChannelHandler {
@@ -113,10 +117,10 @@ namespace Hedwig {
 
     const Configuration& conf;
 
-    Mutex publishercreate_lock;
+    boost::mutex publishercreate_lock;
     PublisherImpl* publisher;
 
-    Mutex subscribercreate_lock;
+    boost::mutex subscribercreate_lock;
     SubscriberImpl* subscriber;
 
     ClientTxnCounter counterobj;
@@ -125,16 +129,16 @@ namespace Hedwig {
     
     typedef std::tr1::unordered_multimap<HostAddress, std::string, HostAddressHash > Host2TopicsMap;
     Host2TopicsMap host2topics;
-    Mutex host2topics_lock;
+    boost::mutex host2topics_lock;
 
     std::tr1::unordered_map<HostAddress, DuplexChannelPtr, HostAddressHash > host2channel;
-    Mutex host2channel_lock;
+    boost::mutex host2channel_lock;
     std::tr1::unordered_map<std::string, HostAddress> topic2host;
-    Mutex topic2host_lock;
+    boost::mutex topic2host_lock;
 
     typedef std::tr1::unordered_set<DuplexChannelPtr, DuplexChannelPtrHash > ChannelMap;
     ChannelMap allchannels;
-    Mutex allchannels_lock;
+    boost::mutex allchannels_lock;
 
     bool shuttingDownFlag;
   };

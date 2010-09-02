@@ -66,7 +66,7 @@ PubSubDataPtr PubSubData::forConsumeRequest(long txnid, const std::string& subsc
   return ptr;  
 }
 
-PubSubData::PubSubData() : request(NULL) {  
+PubSubData::PubSubData() : request(NULL), shouldClaim(false) {  
 }
 
 PubSubData::~PubSubData() {
@@ -104,7 +104,9 @@ const PubSubRequest& PubSubData::getRequest() {
   request->set_protocolversion(Hedwig::VERSION_ONE);
   request->set_type(type);
   request->set_txnid(txnid);
-  request->set_shouldclaim(shouldClaim);
+  if (shouldClaim) {
+    request->set_shouldclaim(shouldClaim);
+  }
   request->set_topic(topic);
     
   if (type == PUBLISH) {
@@ -142,13 +144,11 @@ const PubSubRequest& PubSubData::getRequest() {
     throw UnknownRequestException();
   }
 
-
-
   return *request;
 }
 
 void PubSubData::setShouldClaim(bool shouldClaim) {
-  shouldClaim = shouldClaim;
+  this->shouldClaim = shouldClaim;
 }
 
 void PubSubData::addTriedServer(HostAddress& h) {

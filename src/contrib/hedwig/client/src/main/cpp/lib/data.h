@@ -26,6 +26,7 @@
 #include <tr1/unordered_set>
 #include "util.h"
 #include <boost/shared_ptr.hpp>
+#include <boost/thread/mutex.hpp>
 
 namespace Hedwig {
   /**
@@ -39,7 +40,7 @@ namespace Hedwig {
     
   private:
     long counter;
-    Mutex mutex;
+    boost::mutex mutex;
   };
 
   class PubSubData;
@@ -77,6 +78,7 @@ namespace Hedwig {
     bool hasTriedServer(HostAddress& h);
     void clearTriedServers();
   private:
+
     PubSubData();
     PubSubRequest* request;
     

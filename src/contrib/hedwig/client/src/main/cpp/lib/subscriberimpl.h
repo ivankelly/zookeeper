@@ -27,6 +27,7 @@
 
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
+#include <boost/thread/mutex.hpp>
 
 namespace Hedwig {
   class SubscriberWriteCallback : public OperationCallback {
@@ -118,9 +119,8 @@ namespace Hedwig {
   private:
 
     SubscriberImpl& subscriber;
-#warning "put some limit on this to stop it growing forever"
     std::deque<PubSubResponsePtr> queue;
-
+    
     MessageHandlerCallbackPtr handler;
     PubSubDataPtr origData;
     DuplexChannelPtr channel;
@@ -154,7 +154,7 @@ namespace Hedwig {
     const ClientImplPtr client;
     
     std::tr1::unordered_map<TopicSubscriber, SubscriberClientChannelHandlerPtr, TopicSubscriberHash > topicsubscriber2handler;
-    Mutex topicsubscriber2handler_lock;	    
+    boost::mutex topicsubscriber2handler_lock;	    
   };
 
 };

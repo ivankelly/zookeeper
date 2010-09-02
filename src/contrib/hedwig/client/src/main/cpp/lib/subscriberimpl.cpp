@@ -163,6 +163,9 @@ void SubscriberClientChannelHandler::messageReceived(const DuplexChannelPtr& cha
       this->handler->consume(origData->getTopic(), origData->getSubscriberId(), m->message(), callback);
     } else {
       queue.push_back(m);
+      if (queue.size() >= client->getConfiguration().getMaxMessageQueueSize()) {
+	channel->stopReceiving();
+      }
     }
   } else {
     HedwigClientChannelHandler::messageReceived(channel, m);
@@ -214,9 +217,12 @@ void SubscriberClientChannelHandler::startDelivery(const MessageHandlerCallbackP
 
     this->handler->consume(origData->getTopic(), origData->getSubscriberId(), m->message(), callback);
   }
+  channel->startReceiving();
 }
 
 void SubscriberClientChannelHandler::stopDelivery() {
+  channel->stopReceiving();
+
   this->handler = MessageHandlerCallbackPtr();
 }
 
@@ -273,7 +279,7 @@ void SubscriberImpl::doSubscribe(const DuplexChannelPtr& channel, const PubSubDa
   OperationCallbackPtr writecb(new SubscriberWriteCallback(client, data));
   channel->writeRequest(data->getRequest(), writecb);
 
-  topicsubscriber2handler_lock.lock();
+  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
   TopicSubscriber t(data->getTopic(), data->getSubscriberId());
   SubscriberClientChannelHandlerPtr oldhandler = topicsubscriber2handler[t];
   if (oldhandler != NULL) {
@@ -283,7 +289,6 @@ void SubscriberImpl::doSubscribe(const DuplexChannelPtr& channel, const PubSubDa
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "Set topic subscriber for topic(" << data->getTopic() << ") subscriberId(" << data->getSubscriberId() << ") to " << handler.get() << " topicsubscriber2topic(" << &topicsubscriber2handler << ")";
   }
-  topicsubscriber2handler_lock.unlock();;
 }
 
 void SubscriberImpl::unsubscribe(const std::string& topic, const std::string& subscriberId) {
@@ -312,10 +317,9 @@ void SubscriberImpl::doUnsubscribe(const DuplexChannelPtr& channel, const PubSub
 
 void SubscriberImpl::consume(const std::string& topic, const std::string& subscriberId, const MessageSeqId& messageSeqId) {
   TopicSubscriber t(topic, subscriberId);
-
-  topicsubscriber2handler_lock.lock();
+  
+  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
   SubscriberClientChannelHandlerPtr handler = topicsubscriber2handler[t];
-  topicsubscriber2handler_lock.unlock();
 
   if (handler.get() == 0) {
     LOG.errorStream() << "Cannot consume. Bad handler for topic(" << topic << ") subscriberId(" << subscriberId << ") topicsubscriber2topic(" << &topicsubscriber2handler << ")";
@@ -335,9 +339,8 @@ void SubscriberImpl::consume(const std::string& topic, const std::string& subscr
 void SubscriberImpl::startDelivery(const std::string& topic, const std::string& subscriberId, const MessageHandlerCallbackPtr& callback) {
   TopicSubscriber t(topic, subscriberId);
 
-  topicsubscriber2handler_lock.lock();
+  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
   SubscriberClientChannelHandlerPtr handler = topicsubscriber2handler[t];
-  topicsubscriber2handler_lock.unlock();
 
   if (handler.get() == 0) {
     LOG.errorStream() << "Trying to start deliver on a non existant handler topic = " << topic << ", subscriber = " << subscriberId;
@@ -348,9 +351,8 @@ void SubscriberImpl::startDelivery(const std::string& topic, const std::string& 
 void SubscriberImpl::stopDelivery(const std::string& topic, const std::string& subscriberId) {
   TopicSubscriber t(topic, subscriberId);
 
-  topicsubscriber2handler_lock.lock();
+  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
   SubscriberClientChannelHandlerPtr handler = topicsubscriber2handler[t];
-  topicsubscriber2handler_lock.unlock();
 
   if (handler.get() == 0) {
     LOG.errorStream() << "Trying to start deliver on a non existant handler topic = " << topic << ", subscriber = " << subscriberId;
@@ -364,10 +366,10 @@ void SubscriberImpl::closeSubscription(const std::string& topic, const std::stri
   }
   TopicSubscriber t(topic, subscriberId);
 
-  topicsubscriber2handler_lock.lock();;
+  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
   SubscriberClientChannelHandlerPtr handler = topicsubscriber2handler[t];
   topicsubscriber2handler.erase(t);
-  topicsubscriber2handler_lock.unlock();;
+
   if (handler) {
     handler->close();
   }

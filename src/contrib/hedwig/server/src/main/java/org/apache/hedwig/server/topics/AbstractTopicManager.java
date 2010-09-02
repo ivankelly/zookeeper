@@ -158,6 +158,7 @@ public abstract class AbstractTopicManager implements TopicManager {
     @Override
     public final void getOwner(ByteString topic, boolean shouldClaim,
             Callback<HedwigSocketAddress> cb, Object ctx) {
+	logger.debug("shouldClaim: " + shouldClaim);
         queuer.pushAndMaybeRun(topic, new GetOwnerOp(topic, shouldClaim, cb, ctx));
     }
 
