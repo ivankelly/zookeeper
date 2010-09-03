@@ -18,7 +18,6 @@
 
 #include "publisherimpl.h"
 #include "channel.h"
-#include "concallbacks.h"
 
 #include <log4cpp/Category.hh>
 

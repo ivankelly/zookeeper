@@ -20,7 +20,6 @@
 #include "publisherimpl.h"
 #include "subscriberimpl.h"
 #include <log4cpp/Category.hh>
-#include "concallbacks.h"
 
 static log4cpp::Category &LOG = log4cpp::Category::getInstance("hedwig."__FILE__);
 
