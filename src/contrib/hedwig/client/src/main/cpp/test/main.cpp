@@ -68,10 +68,10 @@ int main( int argc, char **argv)
   
   runner.eventManager().addListener( &gprogress );
 
-  int ret =  runner.run(testPath);
+  bool ret = runner.run(testPath);
   google::protobuf::ShutdownProtobufLibrary();
   
   log4cpp::Category::shutdown();
   
-  return ret;
+  return (ret == true) ? 0 : 1;
 }

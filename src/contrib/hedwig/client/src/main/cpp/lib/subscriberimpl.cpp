@@ -137,10 +137,12 @@ void SubscriberReconnectCallback::operationComplete() {
 
 void SubscriberReconnectCallback::operationFailed(const std::exception& exception) {
   LOG.errorStream() << "Error writing to new subscriber. Channel should pick this up disconnect the channel and try to connect again " << exception.what();
+
+
 }
 
 SubscriberClientChannelHandler::SubscriberClientChannelHandler(const ClientImplPtr& client, SubscriberImpl& subscriber, const PubSubDataPtr& data)
-  : HedwigClientChannelHandler(client), subscriber(subscriber), origData(data), closed(false)  {
+  : HedwigClientChannelHandler(client), subscriber(subscriber), origData(data), closed(false), reconnecting(false)  {
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "Creating SubscriberClientChannelHandler " << this;
   }
@@ -180,6 +182,16 @@ void SubscriberClientChannelHandler::close() {
   }
 }
 
+/*static*/ void SubscriberClientChannelHandler::reconnectTimerComplete(const SubscriberClientChannelHandlerPtr handler,
+								       const DuplexChannelPtr channel, const std::exception e, 
+								       const boost::system::error_code& error) {
+  if (error) {
+    return;
+  }
+  handler->reconnecting = false;
+  handler->channelDisconnected(channel, e);
+}
+
 void SubscriberClientChannelHandler::channelDisconnected(const DuplexChannelPtr& channel, const std::exception& e) {
   // has subscription been closed
   if (closed) {
@@ -191,7 +203,17 @@ void SubscriberClientChannelHandler::channelDisconnected(const DuplexChannelPtr&
   if (client->shuttingDown()) {
     return;
   }
-  
+
+  if (reconnecting) {
+    int retrywait = client->getConfiguration().getReconnectSubscribeRetryWaitTime();
+    
+    boost::asio::deadline_timer t(client->getService(), boost::posix_time::milliseconds(retrywait));
+    t.async_wait(boost::bind(&SubscriberClientChannelHandler::reconnectTimerComplete, shared_from_this(), 
+			     channel, e, boost::asio::placeholders::error));  
+
+  }
+  reconnecting = true;
+
   // setup pubsub data for reconnection attempt
   origData->clearTriedServers();
   OperationCallbackPtr newcallback(new SubscriberReconnectCallback(client, origData));
@@ -201,9 +223,15 @@ void SubscriberClientChannelHandler::channelDisconnected(const DuplexChannelPtr&
   SubscriberClientChannelHandlerPtr newhandler(new SubscriberClientChannelHandler(client, subscriber, origData));  
   ChannelHandlerPtr baseptr = newhandler;
   
-  ChannelConnectCallbackPtr connectcb(new ReconnectSubscribeConnectCallback(client, origData, shared_from_this(), newhandler));
-  DuplexChannelPtr newchannel = client->withNewChannel(origData->getTopic(), baseptr, connectcb);
+  DuplexChannelPtr newchannel = client->createChannel(origData->getTopic(), baseptr);
   newhandler->setChannel(newchannel);
+  handoverDelivery(newhandler);
+  
+  // remove record of the failed channel from the subscriber
+  client->getSubscriberImpl().closeSubscription(origData->getTopic(), origData->getSubscriberId());
+  
+  // subscriber
+  client->getSubscriberImpl().doSubscribe(newchannel, origData, newhandler);
 }
 
 void SubscriberClientChannelHandler::startDelivery(const MessageHandlerCallbackPtr& handler) {
@@ -268,9 +296,9 @@ void SubscriberImpl::asyncSubscribe(const std::string& topic, const std::string&
   SubscriberClientChannelHandlerPtr handler(new SubscriberClientChannelHandler(client, *this, data));
   ChannelHandlerPtr baseptr = handler;
 
-  ChannelConnectCallbackPtr connectcb(new SubscribeConnectCallback(*this, data, handler));
-  DuplexChannelPtr channel = client->withNewChannel(topic, baseptr, connectcb);
+  DuplexChannelPtr channel = client->createChannel(topic, handler);
   handler->setChannel(channel);
+  doSubscribe(channel, data, handler);
 }
 
 void SubscriberImpl::doSubscribe(const DuplexChannelPtr& channel, const PubSubDataPtr& data, const SubscriberClientChannelHandlerPtr& handler) {
@@ -279,7 +307,7 @@ void SubscriberImpl::doSubscribe(const DuplexChannelPtr& channel, const PubSubDa
   OperationCallbackPtr writecb(new SubscriberWriteCallback(client, data));
   channel->writeRequest(data->getRequest(), writecb);
 
-  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
+  boost::lock_guard<boost::shared_mutex> lock(topicsubscriber2handler_lock);
   TopicSubscriber t(data->getTopic(), data->getSubscriberId());
   SubscriberClientChannelHandlerPtr oldhandler = topicsubscriber2handler[t];
   if (oldhandler != NULL) {
@@ -305,8 +333,8 @@ void SubscriberImpl::asyncUnsubscribe(const std::string& topic, const std::strin
 
   PubSubDataPtr data = PubSubData::forUnsubscribeRequest(client->counter().next(), subscriberId, topic, callback);
   
-  ChannelConnectCallbackPtr connectcb(new UnsubscribeConnectCallback(*this, data));
-  client->withChannel(topic, connectcb);
+  DuplexChannelPtr channel = client->getChannel(topic);
+  doUnsubscribe(channel, data);
 }
 
 void SubscriberImpl::doUnsubscribe(const DuplexChannelPtr& channel, const PubSubDataPtr& data) {
@@ -318,7 +346,7 @@ void SubscriberImpl::doUnsubscribe(const DuplexChannelPtr& channel, const PubSub
 void SubscriberImpl::consume(const std::string& topic, const std::string& subscriberId, const MessageSeqId& messageSeqId) {
   TopicSubscriber t(topic, subscriberId);
   
-  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
+  boost::shared_lock<boost::shared_mutex> lock(topicsubscriber2handler_lock);
   SubscriberClientChannelHandlerPtr handler = topicsubscriber2handler[t];
 
   if (handler.get() == 0) {
@@ -339,7 +367,7 @@ void SubscriberImpl::consume(const std::string& topic, const std::string& subscr
 void SubscriberImpl::startDelivery(const std::string& topic, const std::string& subscriberId, const MessageHandlerCallbackPtr& callback) {
   TopicSubscriber t(topic, subscriberId);
 
-  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
+  boost::shared_lock<boost::shared_mutex> lock(topicsubscriber2handler_lock);
   SubscriberClientChannelHandlerPtr handler = topicsubscriber2handler[t];
 
   if (handler.get() == 0) {
@@ -350,8 +378,8 @@ void SubscriberImpl::startDelivery(const std::string& topic, const std::string& 
 
 void SubscriberImpl::stopDelivery(const std::string& topic, const std::string& subscriberId) {
   TopicSubscriber t(topic, subscriberId);
-
-  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
+  
+  boost::shared_lock<boost::shared_mutex> lock(topicsubscriber2handler_lock);
   SubscriberClientChannelHandlerPtr handler = topicsubscriber2handler[t];
 
   if (handler.get() == 0) {
@@ -366,7 +394,7 @@ void SubscriberImpl::closeSubscription(const std::string& topic, const std::stri
   }
   TopicSubscriber t(topic, subscriberId);
 
-  boost::lock_guard<boost::mutex> lock(topicsubscriber2handler_lock);
+  boost::lock_guard<boost::shared_mutex> lock(topicsubscriber2handler_lock);
   SubscriberClientChannelHandlerPtr handler = topicsubscriber2handler[t];
   topicsubscriber2handler.erase(t);
 

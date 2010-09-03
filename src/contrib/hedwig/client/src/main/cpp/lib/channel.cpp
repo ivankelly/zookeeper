@@ -45,15 +45,15 @@ using namespace Hedwig;
 DuplexChannel::DuplexChannel(EventDispatcher& dispatcher, const HostAddress& addr, 
 			     const Configuration& cfg, const ChannelHandlerPtr& handler)
   : dispatcher(dispatcher), address(addr), handler(handler), 
-    socket(dispatcher.getService()), instream_base(&in_buf), instream(&instream_base), out_offset(0),
-    state(UNINITIALISED), receiving(false)
+    socket(dispatcher.getService()), instream(&in_buf), copy_buf(NULL), copy_buf_length(0),
+    state(UNINITIALISED), receiving(false), sending(false)
 {
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "Creating DuplexChannel(" << this << ")";
   }
 }
 
-/*static*/ void DuplexChannel::connectCallbackHandler(DuplexChannelPtr channel, ChannelConnectCallbackPtr callback, 
+/*static*/ void DuplexChannel::connectCallbackHandler(DuplexChannelPtr channel,
 						      const boost::system::error_code& error) {
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "DuplexChannel::connectCallbackHandler error(" << error 
@@ -61,14 +61,7 @@ DuplexChannel::DuplexChannel(EventDispatcher& dispatcher, const HostAddress& add
   }
 
   if (error) {
-    callback->channelError(channel, ChannelConnectException());
-    boost::lock_guard<boost::mutex> lock(channel->connectQueue_lock);
-    while (!channel->connectQueue.empty()) {
-      ChannelConnectCallbackPtr cb = channel->connectQueue.front();
-      channel->connectQueue.pop_front();
-      cb->channelError(channel, ChannelConnectException());
-    }
-      
+    channel->channelDisconnected(ChannelConnectException());
     channel->setState(DEAD);
     return;
   }
@@ -80,51 +73,24 @@ DuplexChannel::DuplexChannel(EventDispatcher& dispatcher, const HostAddress& add
 
   channel->socket.set_option(option, ec);
   if (ec) {
-    callback->channelError(channel, ChannelSetupException());
-    boost::lock_guard<boost::mutex> lock(channel->connectQueue_lock);
-    while (!channel->connectQueue.empty()) {
-      ChannelConnectCallbackPtr cb = channel->connectQueue.front();
-      channel->connectQueue.pop_front();
-      cb->channelError(channel, ChannelSetupException());
-    }      
-
+    channel->channelDisconnected(ChannelSetupException());
     channel->setState(DEAD);
     return;
   } 
-  callback->channelConnected(channel);
   
-  boost::lock_guard<boost::mutex> lock(channel->connectQueue_lock);
-  while (!channel->connectQueue.empty()) {
-    ChannelConnectCallbackPtr cb = channel->connectQueue.front();
-    channel->connectQueue.pop_front();
-    cb->channelConnected(channel);
-  }
-
+  channel->startSending();
   channel->startReceiving();
 }
 
-void DuplexChannel::connect(const ChannelConnectCallbackPtr& callback) {  
+void DuplexChannel::connect() {  
   setState(CONNECTING);
 
   boost::asio::ip::tcp::endpoint endp(boost::asio::ip::address_v4(address.ip()), address.port());
   boost::system::error_code error = boost::asio::error::host_not_found;
 
   socket.async_connect(endp, boost::bind(&DuplexChannel::connectCallbackHandler, 
-					 shared_from_this(), callback,
+					 shared_from_this(), 
 					 boost::asio::placeholders::error)); 
-}
-
-void DuplexChannel::onConnect(const ChannelConnectCallbackPtr& callback) {
-  boost::shared_lock<boost::shared_mutex> statelock(state_lock);
-
-  if (state == CONNECTED) {
-    callback->channelConnected(shared_from_this());
-  } else if (state == CONNECTING) {
-    boost::lock_guard<boost::mutex> lock(connectQueue_lock);
-    connectQueue.push_back(callback);
-  } else {
-    callback->channelError(shared_from_this(), ChannelNotConnectedException());
-  }
 }
 
 /*static*/ void DuplexChannel::messageReadCallbackHandler(DuplexChannelPtr channel, 
@@ -143,8 +109,19 @@ void DuplexChannel::onConnect(const ChannelConnectCallbackPtr& callback) {
     return;
   }
 
+  if (channel->copy_buf_length < message_size) {
+    channel->copy_buf_length = message_size;
+    channel->copy_buf = (char*)realloc(channel->copy_buf, channel->copy_buf_length);
+    if (channel->copy_buf == NULL) {
+      LOG.errorStream() << "Error allocating buffer. channel(" << channel.get() << ")";
+      return;
+    }
+  }
+  
+  channel->instream.read(channel->copy_buf, message_size);
   PubSubResponsePtr response(new PubSubResponse());
-  bool err = response->ParseFromBoundedZeroCopyStream(&channel->instream, message_size);
+  bool err = response->ParseFromArray(channel->copy_buf, message_size);
+
 
   if (!err) {
     LOG.errorStream() << "Error parsing message. channel(" << channel.get() << ")";
@@ -158,7 +135,7 @@ void DuplexChannel::onConnect(const ChannelConnectCallbackPtr& callback) {
 
   ChannelHandlerPtr h;
   {
-    boost::lock_guard<boost::mutex> lock(channel->destruction_lock);
+    boost::shared_lock<boost::shared_mutex> lock(channel->destruction_lock);
     if (channel->handler.get()) {
       h = channel->handler;
     }
@@ -259,10 +236,50 @@ void DuplexChannel::stopReceiving() {
     LOG.debugStream() << "DuplexChannel::stopReceiving channel(" << this << ")";
   }
 
-
   boost::lock_guard<boost::mutex> lock(receiving_lock);
   receiving = false;
 }
+
+void DuplexChannel::startSending() {
+  boost::lock_guard<boost::mutex> lock(sending_lock);
+  if (sending) {
+    return;
+  }
+  if (LOG.isDebugEnabled()) {
+    LOG.debugStream() << "DuplexChannel::startSending channel(" << this << ")";
+  }
+
+  WriteRequest w;
+  { 
+    boost::lock_guard<boost::mutex> lock(write_lock);
+    if (write_queue.empty()) {
+      return;
+    }
+    w = write_queue.front();
+    write_queue.pop_front();
+  }
+
+  sending = true;
+
+  std::ostream os(&out_buf);
+  uint32_t size = htonl(w.first->ByteSize());
+  os.write((char*)&size, sizeof(uint32_t));
+  
+  bool err = w.first->SerializeToOstream(&os);
+  if (!err) {
+    w.second->operationFailed(ChannelWriteException());
+    channelDisconnected(ChannelWriteException());
+    return;
+  }
+
+  boost::asio::async_write(socket, out_buf, 
+			   boost::bind(&DuplexChannel::writeCallbackHandler, 
+				       shared_from_this(), 
+				       w.second,
+				       boost::asio::placeholders::error, 
+				       boost::asio::placeholders::bytes_transferred));
+}
+
 
 const HostAddress& DuplexChannel::getHostAddress() const {
   return address;
@@ -271,9 +288,18 @@ const HostAddress& DuplexChannel::getHostAddress() const {
 void DuplexChannel::channelDisconnected(const std::exception& e) {
   setState(DEAD);
   
+  {
+    boost::lock_guard<boost::mutex> lock(write_lock);
+    while (!write_queue.empty()) {
+      WriteRequest w = write_queue.front();
+      write_queue.pop_front();
+      w.second->operationFailed(e);
+    }
+  }
+
   ChannelHandlerPtr h;
   {
-    boost::lock_guard<boost::mutex> lock(destruction_lock);
+    boost::shared_lock<boost::shared_mutex> lock(destruction_lock);
     if (handler.get()) {
       h = handler;
     }
@@ -294,7 +320,7 @@ void DuplexChannel::kill() {
     connected = (state == CONNECTING || state == CONNECTED);
   }
 
-  boost::lock_guard<boost::mutex> lock(destruction_lock);
+  boost::lock_guard<boost::shared_mutex> lock(destruction_lock);
   if (connected) {
     setState(DEAD);
     
@@ -309,7 +335,9 @@ DuplexChannel::~DuplexChannel() {
   /** If we are going away, fail all transactions that haven't been completed */
   failAllTransactions();
   kill();
-
+  free(copy_buf);
+  copy_buf = NULL;
+  copy_buf_length = 0;
 
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "Destroying DuplexChannel(" << this << ")";
@@ -332,47 +360,39 @@ DuplexChannel::~DuplexChannel() {
 
   callback->operationComplete();
 
-  boost::lock_guard<boost::mutex> offsetlock(channel->out_buf_lock);
   channel->out_buf.consume(bytes_transferred);
-  channel->out_offset -= bytes_transferred;
+
+  {
+    boost::lock_guard<boost::mutex> lock(channel->sending_lock);
+    channel->sending = false;
+  }
+
+  channel->startSending();
 }
 
-void DuplexChannel::writeRequest(const PubSubRequest& m, const OperationCallbackPtr& callback) {
+void DuplexChannel::writeRequest(const PubSubRequestPtr& m, const OperationCallbackPtr& callback) {
   if (LOG.isDebugEnabled()) {
     LOG.debugStream() << "DuplexChannel::writeRequest channel(" << this << ") txnid(" 
-		      << m.txnid() << ") shouldClaim("<< m.has_shouldclaim() << ", " 
-		      << m.shouldclaim() << ")";
+		      << m->txnid() << ") shouldClaim("<< m->has_shouldclaim() << ", " 
+		      << m->shouldclaim() << ")";
   }
 
   {
     boost::shared_lock<boost::shared_mutex> lock(state_lock);
     if (state != CONNECTED && state != CONNECTING) {
-      LOG.errorStream() << "Tried to write transaction [" << m.txnid() << "] to a channel [" 
+      LOG.errorStream() << "Tried to write transaction [" << m->txnid() << "] to a channel [" 
 			<< this << "] which is " << (state == DEAD ? "DEAD" : "UNINITIALISED");
       callback->operationFailed(UninitialisedChannelException());
     }
   }
 
-  std::ostream os(&out_buf);
-  uint32_t size = htonl(m.ByteSize());
-  os.write((char*)&size, sizeof(uint32_t));
-  
-  bool err = m.SerializeToOstream(&os);
-  if (!err) {
-    callback->operationFailed(ChannelWriteException());
-    channelDisconnected(ChannelWriteException());
-    return;
+  { 
+    boost::lock_guard<boost::mutex> lock(write_lock);
+    WriteRequest w(m, callback);
+    write_queue.push_back(w);
   }
 
-  boost::asio::async_write_at(socket, out_offset, out_buf, 
-			      boost::bind(&DuplexChannel::writeCallbackHandler, 
-					  shared_from_this(), 
-					  callback,
-					  boost::asio::placeholders::error, 
-					  boost::asio::placeholders::bytes_transferred));
-  
-  boost::lock_guard<boost::mutex> offsetlock(out_buf_lock);
-  out_offset += m.ByteSize() + sizeof(uint32_t);
+  startSending();
 }
 
 /**

@@ -21,7 +21,7 @@
 #include "publisherimpl.h"
 #include "subscriberimpl.h"
 #include "channel.h"
-
+/*
 namespace Hedwig {
 
   class SubscribeConnectCallback : public ChannelConnectCallback {
@@ -78,6 +78,6 @@ namespace Hedwig {
     const SubscriberClientChannelHandlerPtr newhandler;
   };
 }
-
+*/
 
 #endif

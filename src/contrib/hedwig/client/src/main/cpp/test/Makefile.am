@@ -7,5 +7,5 @@ hedwigtest_LDFLAGS = -no-undefined $(BOOST_ASIO_LIB) $(BOOST_LDFLAGS) $(BOOST_TH
 check: hedwigtest
 	sh ../scripts/run-server-control.sh start
 	sleep 5
-	./hedwigtest
+	./hedwigtest 
 	sh ../scripts/run-server-control.sh stop

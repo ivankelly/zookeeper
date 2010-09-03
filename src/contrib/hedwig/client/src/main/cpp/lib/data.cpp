@@ -66,13 +66,10 @@ PubSubDataPtr PubSubData::forConsumeRequest(long txnid, const std::string& subsc
   return ptr;  
 }
 
-PubSubData::PubSubData() : request(NULL), shouldClaim(false) {  
+PubSubData::PubSubData() : shouldClaim(false) {  
 }
 
 PubSubData::~PubSubData() {
-  if (request != NULL) {
-    delete request;
-  }
 }
 
 OperationType PubSubData::getType() const {
@@ -95,12 +92,8 @@ const MessageSeqId PubSubData::getMessageSeqId() const {
   return msgid;
 }
 
-const PubSubRequest& PubSubData::getRequest() {
-  if (request != NULL) {
-    delete request;
-    request = NULL;
-  }
-  request = new Hedwig::PubSubRequest();
+const PubSubRequestPtr PubSubData::getRequest() {
+  PubSubRequestPtr request(new Hedwig::PubSubRequest());
   request->set_protocolversion(Hedwig::VERSION_ONE);
   request->set_type(type);
   request->set_txnid(txnid);
@@ -144,7 +137,7 @@ const PubSubRequest& PubSubData::getRequest() {
     throw UnknownRequestException();
   }
 
-  return *request;
+  return request;
 }
 
 void PubSubData::setShouldClaim(bool shouldClaim) {

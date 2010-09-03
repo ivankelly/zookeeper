@@ -96,8 +96,8 @@ namespace Hedwig {
 
     //DuplexChannelPtr getChannelForTopic(const std::string& topic, OperationCallback& callback);
     //DuplexChannelPtr createChannelForTopic(const std::string& topic, ChannelHandlerPtr& handler, OperationCallback& callback);
-    DuplexChannelPtr withNewChannel(const std::string& topic, const ChannelHandlerPtr& handler, const ChannelConnectCallbackPtr& callback);    
-    DuplexChannelPtr withChannel(const std::string& topic, const ChannelConnectCallbackPtr& callback);
+    DuplexChannelPtr createChannel(const std::string& topic, const ChannelHandlerPtr& handler);    
+    DuplexChannelPtr getChannel(const std::string& topic);
 
     void setHostForTopic(const std::string& topic, const HostAddress& host);
 
@@ -129,16 +129,16 @@ namespace Hedwig {
     
     typedef std::tr1::unordered_multimap<HostAddress, std::string, HostAddressHash > Host2TopicsMap;
     Host2TopicsMap host2topics;
-    boost::mutex host2topics_lock;
+    boost::shared_mutex host2topics_lock;
 
     std::tr1::unordered_map<HostAddress, DuplexChannelPtr, HostAddressHash > host2channel;
-    boost::mutex host2channel_lock;
+    boost::shared_mutex host2channel_lock;
     std::tr1::unordered_map<std::string, HostAddress> topic2host;
-    boost::mutex topic2host_lock;
+    boost::shared_mutex topic2host_lock;
 
     typedef std::tr1::unordered_set<DuplexChannelPtr, DuplexChannelPtrHash > ChannelMap;
     ChannelMap allchannels;
-    boost::mutex allchannels_lock;
+    boost::shared_mutex allchannels_lock;
 
     bool shuttingDownFlag;
   };

@@ -45,6 +45,8 @@ namespace Hedwig {
 
   class PubSubData;
   typedef boost::shared_ptr<PubSubData> PubSubDataPtr;
+  typedef boost::shared_ptr<PubSubRequest> PubSubRequestPtr;
+  typedef boost::shared_ptr<PubSubResponse> PubSubResponsePtr;
 
   /**
      Data structure to hold information about requests and build request messages.
@@ -69,7 +71,7 @@ namespace Hedwig {
 
     void setShouldClaim(bool shouldClaim);
 
-    const PubSubRequest& getRequest();
+    const PubSubRequestPtr getRequest();
     void setCallback(const OperationCallbackPtr& callback);
     OperationCallbackPtr& getCallback();
     SubscribeRequest::CreateOrAttach getMode() const;
@@ -80,7 +82,6 @@ namespace Hedwig {
   private:
 
     PubSubData();
-    PubSubRequest* request;
     
     OperationType type;
     long txnid;
@@ -93,7 +94,6 @@ namespace Hedwig {
     MessageSeqId msgid;
     std::tr1::unordered_set<HostAddress, HostAddressHash > triedservers;
   };
-
-  typedef boost::shared_ptr<PubSubResponse> PubSubResponsePtr;
+  
 };
 #endif

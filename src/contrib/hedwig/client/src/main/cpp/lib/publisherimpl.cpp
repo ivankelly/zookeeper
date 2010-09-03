@@ -57,8 +57,8 @@ void PublisherImpl::asyncPublish(const std::string& topic, const std::string& me
   // use release after callback to release the channel after the callback is called
   PubSubDataPtr data = PubSubData::forPublishRequest(client->counter().next(), topic, message, callback);
   
-  ChannelConnectCallbackPtr connectcb(new PublishConnectCallback(*this, data));
-  client->withChannel(topic, connectcb);
+  DuplexChannelPtr channel = client->getChannel(topic);
+  doPublish(channel, data);
 }
 
 void PublisherImpl::doPublish(const DuplexChannelPtr& channel, const PubSubDataPtr& data) {

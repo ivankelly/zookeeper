@@ -174,7 +174,7 @@ void ClientImpl::Destroy() {
 
   dispatcher.stop();
   {
-    boost::lock_guard<boost::mutex> lock(allchannels_lock);
+    boost::lock_guard<boost::shared_mutex> lock(allchannels_lock);
     
     shuttingDownFlag = true;
     for (ChannelMap::iterator iter = allchannels.begin(); iter != allchannels.end(); ++iter ) {
@@ -256,15 +256,15 @@ void ClientImpl::redirectRequest(const DuplexChannelPtr& channel, PubSubDataPtr&
     if (data->getType() == SUBSCRIBE) {
       SubscriberClientChannelHandlerPtr handler(new SubscriberClientChannelHandler(shared_from_this(), 
 										   this->getSubscriberImpl(), data));
-      ChannelConnectCallbackPtr connectcb(new SubscribeConnectCallback(getSubscriberImpl(), data, handler));
-      newchannel = withNewChannel(data->getTopic(), handler, connectcb);
+      newchannel = createChannel(data->getTopic(), handler);
       handler->setChannel(newchannel);
+      getSubscriberImpl().doSubscribe(newchannel, data, handler);
     } else if (data->getType() == PUBLISH) {
-      ChannelConnectCallbackPtr connectcb(new PublishConnectCallback(getPublisherImpl(), data));
-      withChannel(data->getTopic(), connectcb);
+      newchannel = getChannel(data->getTopic());
+      getPublisherImpl().doPublish(newchannel, data);
     } else {
-      ChannelConnectCallbackPtr connectcb(new UnsubscribeConnectCallback(getSubscriberImpl(), data));
-      withChannel(data->getTopic(), connectcb);
+      newchannel = getChannel(data->getTopic());
+      getSubscriberImpl().doUnsubscribe(newchannel, data);
     }
   } catch (ShuttingDownException& e) {
     return; // no point in redirecting if we're shutting down
@@ -277,8 +277,7 @@ ClientImpl::~ClientImpl() {
   }
 }
 
-DuplexChannelPtr ClientImpl::withNewChannel(const std::string& topic, const ChannelHandlerPtr& handler, 
-					    const ChannelConnectCallbackPtr& callback) {
+DuplexChannelPtr ClientImpl::createChannel(const std::string& topic, const ChannelHandlerPtr& handler) {
   // get the host address
   // create a channel to the host
   HostAddress addr = topic2host[topic];
@@ -289,13 +288,12 @@ DuplexChannelPtr ClientImpl::withNewChannel(const std::string& topic, const Chan
 
   DuplexChannelPtr channel(new DuplexChannel(dispatcher, addr, conf, handler));
 
-  boost::lock_guard<boost::mutex> lock(allchannels_lock);
+  boost::lock_guard<boost::shared_mutex> lock(allchannels_lock);
   if (shuttingDownFlag) {
     channel->kill();
-    callback->channelError(channel, ShuttingDownException());
-    return channel;
+    throw ShuttingDownException();
   }
-  channel->connect(callback);
+  channel->connect();
 
   allchannels.insert(channel);
   if (LOG.isDebugEnabled()) {
@@ -305,7 +303,7 @@ DuplexChannelPtr ClientImpl::withNewChannel(const std::string& topic, const Chan
   return channel;
 }
 
-DuplexChannelPtr ClientImpl::withChannel(const std::string& topic, const ChannelConnectCallbackPtr& callback) {
+DuplexChannelPtr ClientImpl::getChannel(const std::string& topic) {
   HostAddress addr = topic2host[topic];
   if (addr.isNullHost()) {
     addr = HostAddress::fromString(conf.getDefaultServer());
@@ -318,21 +316,17 @@ DuplexChannelPtr ClientImpl::withChannel(const std::string& topic, const Channel
       LOG.debugStream() << " No channel for topic, creating new channel.get() " << channel.get() << " addr " << addr.getAddressString();
     }
     ChannelHandlerPtr handler(new HedwigClientChannelHandler(shared_from_this()));
-    channel = withNewChannel(topic, handler, callback);
+    channel = createChannel(topic, handler);
 
-    boost::lock_guard<boost::mutex> lock(host2channel_lock);
+    boost::lock_guard<boost::shared_mutex> lock(host2channel_lock);
     host2channel[addr] = channel;
-
-    return channel;
-  } else {
-    channel->onConnect(callback);
-  }
+  } 
 
   return channel;
 }
 
 void ClientImpl::setHostForTopic(const std::string& topic, const HostAddress& host) {
-  boost::lock_guard<boost::mutex> lock(topic2host_lock);
+  boost::lock_guard<boost::shared_mutex> lock(topic2host_lock);
   topic2host[topic] = host;
 }
 
@@ -351,10 +345,10 @@ void ClientImpl::channelDied(const DuplexChannelPtr& channel) {
     return;
   }
 
-  boost::lock_guard<boost::mutex> h2tlock(host2topics_lock);
-  boost::lock_guard<boost::mutex> h2clock(host2channel_lock);
-  boost::lock_guard<boost::mutex> t2hlock(topic2host_lock);
-  boost::lock_guard<boost::mutex> aclock(allchannels_lock);
+  boost::lock_guard<boost::shared_mutex> h2tlock(host2topics_lock);
+  boost::lock_guard<boost::shared_mutex> h2clock(host2channel_lock);
+  boost::lock_guard<boost::shared_mutex> t2hlock(topic2host_lock);
+  boost::lock_guard<boost::shared_mutex> aclock(allchannels_lock);
   // get host
   HostAddress addr = channel->getHostAddress();
   

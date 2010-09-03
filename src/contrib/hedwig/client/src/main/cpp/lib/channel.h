@@ -55,13 +55,6 @@ namespace Hedwig {
   class DuplexChannel;
   typedef boost::shared_ptr<DuplexChannel> DuplexChannelPtr;
 
-  class ChannelConnectCallback {
-  public:
-    virtual void channelConnected(const DuplexChannelPtr& channel) = 0;
-    virtual void channelError(const DuplexChannelPtr& channel, const std::exception& e) = 0;
-  };
-  typedef boost::shared_ptr<ChannelConnectCallback> ChannelConnectCallbackPtr;
-
   class ChannelHandler {
   public:
     virtual void messageReceived(const DuplexChannelPtr& channel, const PubSubResponsePtr& m) = 0;
@@ -81,15 +74,13 @@ namespace Hedwig {
     DuplexChannel(EventDispatcher& dispatcher, const HostAddress& addr, 
 		  const Configuration& cfg, const ChannelHandlerPtr& handler);
     static void connectCallbackHandler(DuplexChannelPtr channel, 
-				       ChannelConnectCallbackPtr callback, 
 				       const boost::system::error_code& error);
-    void connect(const ChannelConnectCallbackPtr& callback);
-    void onConnect(const ChannelConnectCallbackPtr& callback);
+    void connect();
 
     static void writeCallbackHandler(DuplexChannelPtr channel, OperationCallbackPtr callback, 
 				     const boost::system::error_code& error, 
 				     std::size_t bytes_transferred);
-    void writeRequest(const PubSubRequest& m, const OperationCallbackPtr& callback);
+    void writeRequest(const PubSubRequestPtr& m, const OperationCallbackPtr& callback);
     
     const HostAddress& getHostAddress() const;
 
@@ -109,6 +100,8 @@ namespace Hedwig {
     bool isReceiving();
     void stopReceiving();
     
+    void startSending();
+
     void channelDisconnected(const std::exception& e);
     virtual void kill();
 
@@ -125,29 +118,32 @@ namespace Hedwig {
 
     boost::asio::ip::tcp::socket socket;
     boost::asio::streambuf in_buf;
-    std::istream instream_base;
-    google::protobuf::io::IstreamInputStream instream;
+    std::istream instream;
+    
+    // only exists because protobufs can't play nice with streams (if there's more than message len in it, it tries to read all)
+    char* copy_buf;
+    int copy_buf_length;
 
     boost::asio::streambuf out_buf;
     
-    typedef std::pair<PubSubRequest, OperationCallbackPtr> WriteRequest;
+    typedef std::pair<PubSubRequestPtr, OperationCallbackPtr> WriteRequest;
     boost::mutex write_lock;
-    std::deque<>;
+    std::deque<WriteRequest> write_queue;
 
     State state;
     boost::shared_mutex state_lock;
 
     bool receiving;
     boost::mutex receiving_lock;
-
-    boost::mutex connectQueue_lock;
-    std::deque<ChannelConnectCallbackPtr> connectQueue;
+    
+    bool sending;
+    boost::mutex sending_lock;
 
     typedef std::tr1::unordered_map<long, PubSubDataPtr> TransactionMap;
 
     TransactionMap txnid2data;
     boost::mutex txnid2data_lock;
-    boost::mutex destruction_lock;
+    boost::shared_mutex destruction_lock;
   };
   
 

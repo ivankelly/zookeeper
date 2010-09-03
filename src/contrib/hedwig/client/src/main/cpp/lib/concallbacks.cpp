@@ -25,7 +25,7 @@ static log4cpp::Category &LOG = log4cpp::Category::getInstance("hedwig."__FILE__
 using namespace Hedwig;
 
 const int SUBSCRIBER_RECONNECT_TIME = 3000; // 3 seconds
-
+/*
 SubscribeConnectCallback::SubscribeConnectCallback(SubscriberImpl& subscriber, const PubSubDataPtr& data, 
                                         	   const SubscriberClientChannelHandlerPtr& handler)
   : subscriber(subscriber), data(data), handler(handler) {
@@ -81,7 +81,7 @@ void ReconnectSubscribeConnectCallback::channelConnected(const DuplexChannelPtr&
   client->getSubscriberImpl().doSubscribe(channel, data, newhandler);
 }
 
-/*static*/ void ReconnectSubscribeConnectCallback::timerComplete(const SubscriberClientChannelHandlerPtr handler,
+/static/ void ReconnectSubscribeConnectCallback::timerComplete(const SubscriberClientChannelHandlerPtr handler,
 								 const DuplexChannelPtr channel, const std::exception e, 
 								 const boost::system::error_code& error) {
   if (error) {
@@ -101,3 +101,4 @@ void ReconnectSubscribeConnectCallback::channelError(const DuplexChannelPtr& cha
   t.async_wait(boost::bind(&ReconnectSubscribeConnectCallback::timerComplete, oldhandler, 
 			   channel, e, boost::asio::placeholders::error));  
 }
+*/
