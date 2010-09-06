@@ -37,7 +37,7 @@ namespace HedwigTest {
   public:
     virtual void kill() = 0;
     virtual std::string& getAddress() = 0;
-    virtual TestServer() {}
+    virtual ~TestServer() {}
   };
   
   typedef std::tr1::shared_ptr<TestServer> TestServerPtr;

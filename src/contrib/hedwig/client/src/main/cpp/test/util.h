@@ -111,7 +111,7 @@ public:
     return 5000;
   }
   
-  virtual int getMaxMessageQueueSize() const {
+  virtual std::size_t getMaxMessageQueueSize() const {
     return 10;
   }
   
