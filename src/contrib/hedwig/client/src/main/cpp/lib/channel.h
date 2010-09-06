@@ -105,7 +105,7 @@ namespace Hedwig {
     void channelDisconnected(const std::exception& e);
     virtual void kill();
 
-    ~DuplexChannel();
+    virtual ~DuplexChannel();
   private:
     enum State { UNINITIALISED, CONNECTING, CONNECTED, DEAD };
 
@@ -122,7 +122,7 @@ namespace Hedwig {
     
     // only exists because protobufs can't play nice with streams (if there's more than message len in it, it tries to read all)
     char* copy_buf;
-    int copy_buf_length;
+    std::size_t copy_buf_length;
 
     boost::asio::streambuf out_buf;
     

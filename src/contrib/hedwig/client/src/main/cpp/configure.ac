@@ -16,7 +16,7 @@ AX_BOOST_THREAD
 DX_HTML_FEATURE(ON)
 DX_INIT_DOXYGEN(hedwig-c++, c-doc.Doxyfile, doc)
 
-CXXFLAGS="$CXXFLAGS -fno-inline"
+CXXFLAGS="$CXXFLAGS -Wall"
 
 AC_OUTPUT
 

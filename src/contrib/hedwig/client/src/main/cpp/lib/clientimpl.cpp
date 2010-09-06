@@ -93,7 +93,6 @@ void HedwigClientChannelHandler::messageReceived(const DuplexChannelPtr& channel
     return;
   }
   
-  long txnid = m->txnid();
   PubSubDataPtr data = channel->retrieveTransaction(m->txnid()); 
   /* you now have ownership of data, don't leave this funciton without deleting it or 
      palming it off to someone else */
@@ -195,7 +194,7 @@ void ClientImpl::Destroy() {
 }
 
 ClientImpl::ClientImpl(const Configuration& conf) 
-  : conf(conf), subscriber(NULL), publisher(NULL), counterobj(), shuttingDownFlag(false)
+  : conf(conf), publisher(NULL), subscriber(NULL), counterobj(), shuttingDownFlag(false)
 {
 }
 
