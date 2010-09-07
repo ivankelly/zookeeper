@@ -34,13 +34,18 @@ namespace Hedwig {
 
   class Configuration {
   public:
+    static const std::string DEFAULT_SERVER;
+    static const std::string MESSAGE_CONSUME_RETRY_WAIT_TIME;
+    static const std::string SUBSCRIBER_CONSUME_RETRY_WAIT_TIME;
+    static const std::string MAX_MESSAGE_QUEUE_SIZE;
+    static const std::string RECONNECT_SUBSCRIBE_RETRY_WAIT_TIME;
+
+  public:
     Configuration() {};
-    virtual int getReconnectSubscribeRetryWaitTime() const = 0;
-    virtual int getMessageConsumeRetryWaitTime() const = 0;
-    virtual int getSubscriberConsumeRetryWaitTime() const = 0;
-    virtual const std::string& getDefaultServer() const = 0;    
-    virtual std::size_t getMaxMessageQueueSize() const = 0;
-    
+    virtual int getInt(const std::string& key, int defaultVal) const = 0;
+    virtual const std::string get(const std::string& key, const std::string& defaultVal) const = 0;
+    virtual bool getBool(const std::string& key, bool defaultVal) const = 0;
+
     virtual ~Configuration() {}
   };
 

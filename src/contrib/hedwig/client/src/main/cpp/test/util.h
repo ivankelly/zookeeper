@@ -95,24 +95,20 @@ class TestServerConfiguration : public Hedwig::Configuration {
 public:
   TestServerConfiguration(HedwigTest::TestServerPtr& server) : server(server), address(server->getAddress()) {}
   
-  virtual const std::string& getDefaultServer() const {
-    return address;
-  }
-  
-  virtual int getReconnectSubscribeRetryWaitTime() const {
-    return 5000;
+  virtual int getInt(const std::string& /*key*/, int defaultVal) const {
+    return defaultVal;
   }
 
-  virtual int getMessageConsumeRetryWaitTime() const {
-    return 5000;
+  virtual const std::string get(const std::string& key, const std::string& defaultVal) const {
+    if (key == Configuration::DEFAULT_SERVER) {
+      return address;
+    } else {
+      return defaultVal;
+    }
   }
 
-  virtual int getSubscriberConsumeRetryWaitTime() const {
-    return 5000;
-  }
-  
-  virtual std::size_t getMaxMessageQueueSize() const {
-    return 10;
+  virtual bool getBool(const std::string& /*key*/, bool defaultVal) const {
+    return defaultVal;
   }
   
 private:

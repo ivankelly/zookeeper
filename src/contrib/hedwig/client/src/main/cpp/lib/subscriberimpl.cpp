@@ -28,6 +28,10 @@
 static log4cpp::Category &LOG = log4cpp::Category::getInstance("hedwig."__FILE__);
 
 using namespace Hedwig;
+const int DEFAULT_MESSAGE_CONSUME_RETRY_WAIT_TIME = 5000;
+const int DEFAULT_SUBSCRIBER_CONSUME_RETRY_WAIT_TIME = 5000;
+const int DEFAULT_MAX_MESSAGE_QUEUE_SIZE = 10;
+const int DEFAULT_RECONNECT_SUBSCRIBE_RETRY_WAIT_TIME = 5000;
 
 SubscriberWriteCallback::SubscriberWriteCallback(const ClientImplPtr& client, const PubSubDataPtr& data) : client(client), data(data) {}
 
@@ -82,7 +86,8 @@ void ConsumeWriteCallback::operationComplete() {
 }
 
 void ConsumeWriteCallback::operationFailed(const std::exception& exception) {
-  int retrywait = client->getConfiguration().getMessageConsumeRetryWaitTime();
+  int retrywait = client->getConfiguration().getInt(Configuration::MESSAGE_CONSUME_RETRY_WAIT_TIME, 
+						    DEFAULT_MESSAGE_CONSUME_RETRY_WAIT_TIME);
   LOG.errorStream() << "Error writing consume transaction: " << data->getTxnId() << " error: " << exception.what() 
 		    << " retrying in " << retrywait << " Microseconds";
 
@@ -117,7 +122,8 @@ void SubscriberConsumeCallback::operationComplete() {
 void SubscriberConsumeCallback::operationFailed(const std::exception& exception) {
   LOG.errorStream() << "ConsumeCallback::operationFailed  " << data->getTopic() << " - " << data->getSubscriberId();
   
-  int retrywait = client->getConfiguration().getSubscriberConsumeRetryWaitTime();
+  int retrywait = client->getConfiguration().getInt(Configuration::SUBSCRIBER_CONSUME_RETRY_WAIT_TIME,
+						    DEFAULT_SUBSCRIBER_CONSUME_RETRY_WAIT_TIME);
 
   LOG.errorStream() << "Error passing message to client transaction: " << data->getTxnId() << " error: " << exception.what() 
 		    << " retrying in " << retrywait << " Microseconds";
@@ -164,7 +170,8 @@ void SubscriberClientChannelHandler::messageReceived(const DuplexChannelPtr& cha
       this->handler->consume(origData->getTopic(), origData->getSubscriberId(), m->message(), callback);
     } else {
       queue.push_back(m);
-      if (queue.size() >= client->getConfiguration().getMaxMessageQueueSize()) {
+      if (queue.size() >= (std::size_t)client->getConfiguration().getInt(Configuration::MAX_MESSAGE_QUEUE_SIZE,
+									 DEFAULT_MAX_MESSAGE_QUEUE_SIZE)) {
 	channel->stopReceiving();
       }
     }
@@ -204,7 +211,8 @@ void SubscriberClientChannelHandler::channelDisconnected(const DuplexChannelPtr&
   }
 
   if (reconnecting) {
-    int retrywait = client->getConfiguration().getReconnectSubscribeRetryWaitTime();
+    int retrywait = client->getConfiguration().getInt(Configuration::RECONNECT_SUBSCRIBE_RETRY_WAIT_TIME,
+						      DEFAULT_RECONNECT_SUBSCRIBE_RETRY_WAIT_TIME);
     
     boost::asio::deadline_timer t(client->getService(), boost::posix_time::milliseconds(retrywait));
     t.async_wait(boost::bind(&SubscriberClientChannelHandler::reconnectTimerComplete, shared_from_this(), 

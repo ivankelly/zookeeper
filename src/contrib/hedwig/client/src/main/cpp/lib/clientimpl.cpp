@@ -25,6 +25,8 @@ static log4cpp::Category &LOG = log4cpp::Category::getInstance("hedwig."__FILE__
 
 using namespace Hedwig;
 
+const std::string DEFAULT_SERVER_DEFAULT_VAL = "";
+
 void SyncOperationCallback::wait() {
   boost::unique_lock<boost::mutex> lock(mut);
   while(response==PENDING) {
@@ -280,7 +282,7 @@ DuplexChannelPtr ClientImpl::createChannel(const std::string& topic, const Chann
   // create a channel to the host
   HostAddress addr = topic2host[topic];
   if (addr.isNullHost()) {
-    addr = HostAddress::fromString(conf.getDefaultServer());
+    addr = HostAddress::fromString(conf.get(Configuration::DEFAULT_SERVER, DEFAULT_SERVER_DEFAULT_VAL));
     setHostForTopic(topic, addr);
   }
 
@@ -304,7 +306,7 @@ DuplexChannelPtr ClientImpl::createChannel(const std::string& topic, const Chann
 DuplexChannelPtr ClientImpl::getChannel(const std::string& topic) {
   HostAddress addr = topic2host[topic];
   if (addr.isNullHost()) {
-    addr = HostAddress::fromString(conf.getDefaultServer());
+    addr = HostAddress::fromString(conf.get(Configuration::DEFAULT_SERVER, DEFAULT_SERVER_DEFAULT_VAL));
     setHostForTopic(topic, addr);
   }  
   DuplexChannelPtr channel = host2channel[addr];

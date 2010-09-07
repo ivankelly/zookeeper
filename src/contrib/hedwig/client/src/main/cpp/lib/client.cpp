@@ -26,10 +26,11 @@ static log4cpp::Category &LOG = log4cpp::Category::getInstance("hedwig."__FILE__
 
 using namespace Hedwig;
 
-const std::string DEFAULT_SERVER = "localhost:4080";
-const std::string& Configuration::getDefaultServer() const {
-  return DEFAULT_SERVER;
-}
+const std::string Configuration::DEFAULT_SERVER = "hedwig.cpp.default_server";
+const std::string Configuration::MESSAGE_CONSUME_RETRY_WAIT_TIME = "hedwig.cpp.message_consume_retry_wait_time";
+const std::string Configuration::SUBSCRIBER_CONSUME_RETRY_WAIT_TIME = "hedwig.cpp.subscriber_consume_retry_wait_time";
+const std::string Configuration::MAX_MESSAGE_QUEUE_SIZE = "hedwig.cpp.max_msgqueue_size";
+const std::string Configuration::RECONNECT_SUBSCRIBE_RETRY_WAIT_TIME = "hedwig.cpp.reconnect_subscribe_retry_wait_time";
 
 Client::Client(const Configuration& conf) {
   if (LOG.isDebugEnabled()) {
