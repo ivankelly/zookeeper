@@ -38,8 +38,6 @@ import org.apache.zookeeper.AsyncCallback.StatCallback;
 import org.apache.zookeeper.AsyncCallback.StringCallback;
 import org.apache.zookeeper.AsyncCallback.VoidCallback;
 import org.apache.zookeeper.common.PathUtils;
-import org.apache.zookeeper.common.fd.FailureDetector;
-import org.apache.zookeeper.common.fd.FixedPingFailureDetector;
 import org.apache.zookeeper.data.ACL;
 import org.apache.zookeeper.data.Stat;
 import org.apache.zookeeper.proto.CreateRequest;
@@ -329,38 +327,6 @@ public class ZooKeeper {
     protected final ClientCnxn cnxn;
 
     /**
-     * Creates a ZooKeeper client object, with specified failure detector
-     * instance.
-     * 
-     * @see #ZooKeeper(String, int, Watcher)
-     * @param connectString
-     *            comma separated host:port pairs, each corresponding to a zk
-     *            server.
-     * @param sessionTimeout
-     *            session timeout in milliseconds
-     * @param watcher
-     *            a watcher object which will be notified of state changes, may
-     *            also be notified for node events
-     * @param fd the failure detection method to be used in server monitoring.
-     * 
-     * @throws IOException
-     *             in cases of network failure
-     * @throws IllegalArgumentException
-     *             if an invalid chroot path is specified
-     */
-    public ZooKeeper(String connectString, int sessionTimeout, 
-            Watcher watcher, FailureDetector fd)
-        throws IOException
-    {
-        LOG.info("Initiating client connection, connectString=" + connectString
-                + " sessionTimeout=" + sessionTimeout + " watcher=" + watcher);
-
-        watchManager.defaultWatcher = watcher;
-        cnxn = new ClientCnxn(connectString, sessionTimeout, this, watchManager, fd);
-        cnxn.start();
-    }
-    
-    /**
      * To create a ZooKeeper client object, the application needs to pass a
      * connection string containing a comma separated list of host:port pairs,
      * each corresponding to a ZooKeeper server.
@@ -397,7 +363,7 @@ public class ZooKeeper {
      * @param watcher
      *            a watcher object which will be notified of state changes, may
      *            also be notified for node events
-     * 
+     *
      * @throws IOException
      *             in cases of network failure
      * @throws IllegalArgumentException
@@ -406,47 +372,14 @@ public class ZooKeeper {
     public ZooKeeper(String connectString, int sessionTimeout, Watcher watcher)
         throws IOException
     {
-        this(connectString, sessionTimeout, watcher, new FixedPingFailureDetector());
-    }
-
-    /**
-     * Creates a ZooKeeper client object, with specified failure detector
-     * instance.
-     * @see #ZooKeeper(String, int, Watcher, long, byte[])
-     * @param connectString
-     *            comma separated host:port pairs, each corresponding to a zk
-     *            server.
-     * @param sessionTimeout
-     *            session timeout in milliseconds
-     * @param watcher
-     *            a watcher object which will be notified of state changes, may
-     *            also be notified for node events
-     * @param fd the failure detection method to be used in server monitoring.
-     * @param sessionId
-     *            specific session id to use if reconnecting
-     * @param sessionPasswd
-     *            password for this session
-     *
-     * @throws IOException in cases of network failure
-     * @throws IllegalArgumentException if an invalid chroot path is specified
-     */
-    public ZooKeeper(String connectString, int sessionTimeout, Watcher watcher,
-            FailureDetector fd, long sessionId, byte[] sessionPasswd)
-        throws IOException
-    {
         LOG.info("Initiating client connection, connectString=" + connectString
-                + " sessionTimeout=" + sessionTimeout
-                + " watcher=" + watcher
-                + " sessionId=" + sessionId
-                + " sessionPasswd="
-                + (sessionPasswd == null ? "<null>" : "<hidden>"));
+                + " sessionTimeout=" + sessionTimeout + " watcher=" + watcher);
 
         watchManager.defaultWatcher = watcher;
-        cnxn = new ClientCnxn(connectString, sessionTimeout, this, watchManager,
-                fd, sessionId, sessionPasswd);
+        cnxn = new ClientCnxn(connectString, sessionTimeout, this, watchManager);
         cnxn.start();
     }
-    
+
     /**
      * To create a ZooKeeper client object, the application needs to pass a
      * connection string containing a comma separated list of host:port pairs,
@@ -490,7 +423,6 @@ public class ZooKeeper {
      * @param watcher
      *            a watcher object which will be notified of state changes, may
      *            also be notified for node events
-     * @param sessionFd the failure detection method to be used in server monitoring.
      * @param sessionId
      *            specific session id to use if reconnecting
      * @param sessionPasswd
@@ -512,7 +444,7 @@ public class ZooKeeper {
 
         watchManager.defaultWatcher = watcher;
         cnxn = new ClientCnxn(connectString, sessionTimeout, this, watchManager,
-                new FixedPingFailureDetector(), sessionId, sessionPasswd);
+                sessionId, sessionPasswd);
         cnxn.start();
     }
 

@@ -36,7 +36,6 @@ import org.apache.jute.Record;
 import org.apache.log4j.Logger;
 import org.apache.zookeeper.KeeperException.SessionExpiredException;
 import org.apache.zookeeper.ZooDefs.OpCode;
-import org.apache.zookeeper.common.fd.MessageType;
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.ZooTrace;
 import org.apache.zookeeper.server.quorum.Leader.Proposal;
@@ -60,7 +59,7 @@ public class LearnerHandler extends Thread {
 
     final Leader leader;
 
-    private long lastAck;
+    long tickOfLastAck;
     
     /**
      * ZooKeeper server identifier of this learner
@@ -94,7 +93,7 @@ public class LearnerHandler extends Thread {
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("LearnerHandler ").append(sock);
-        sb.append(" timeOfLastAck:").append(lastAck);
+        sb.append(" tickOfLastAck:").append(tickOfLastAck());
         sb.append(" synced?:").append(synced());
         sb.append(" queuedPacketLength:").append(queuedPackets.size());
         return sb.toString();
@@ -245,12 +244,6 @@ public class LearnerHandler extends Thread {
             	this.sid = leader.followerCounter.getAndDecrement();
             }
 
-            synchronized (leader.getLeanersFd()) {
-                leader.getLeanersFd().registerMonitored(String.valueOf(sid), System
-                        .currentTimeMillis(), leader.self.syncLimit
-                        * leader.self.tickTime);
-            }
-            
             LOG.info("Follower sid: " + this.sid + " : info : "
                     + leader.self.quorumPeers.get(this.sid));
                         
@@ -387,26 +380,14 @@ public class LearnerHandler extends Thread {
                 ia.readRecord(qp, "packet");
 
                 long traceMask = ZooTrace.SERVER_PACKET_TRACE_MASK;
-                long now = System.currentTimeMillis();
                 if (qp.getType() == Leader.PING) {
                     traceMask = ZooTrace.SERVER_PING_TRACE_MASK;
-                    synchronized (leader.getLeanersFd()) {
-                        leader.getLeanersFd().messageReceived(
-                                String.valueOf(getSid()), now,
-                                MessageType.PING);
-                    }
-                } else {
-                    synchronized (leader.getLeanersFd()) {
-                        leader.getLeanersFd().messageReceived(
-                                String.valueOf(getSid()), now, 
-                                MessageType.APPLICATION);
-                    }
                 }
-                lastAck = now;
-                
                 if (LOG.isTraceEnabled()) {
                     ZooTrace.logQuorumPacket(LOG, traceMask, 'i', qp);
                 }
+                tickOfLastAck = leader.self.tick;
+
 
                 ByteBuffer bb;
                 long sessionId;
@@ -430,15 +411,7 @@ public class LearnerHandler extends Thread {
                     while (dis.available() > 0) {
                         long sess = dis.readLong();
                         int to = dis.readInt();
-                        boolean updateSample = dis.readBoolean();
-                        long iaMean = dis.readLong();
-                        long iaStdDev = dis.readLong();
-                        
-                        if (!updateSample) {
-                            leader.zk.touch(sess, to);
-                        } else {
-                            leader.zk.updatePingSample(sess, to, iaMean, iaStdDev);
-                        }
+                        leader.zk.touch(sess, to);
                     }
                     break;
                 case Leader.REVALIDATE:
@@ -528,6 +501,10 @@ public class LearnerHandler extends Thread {
         leader.removeLearnerHandler(this);
     }
 
+    public long tickOfLastAck() {
+        return tickOfLastAck;
+    }
+
     /**
      * ping calls from the leader to the peers
      */
@@ -539,11 +516,6 @@ public class LearnerHandler extends Thread {
         QuorumPacket ping = new QuorumPacket(Leader.PING, id,
                 null, null);
         queuePacket(ping);
-        synchronized (leader.getLeanersFd()) {
-            leader.getLeanersFd().messageSent(
-                    String.valueOf(sid), System.currentTimeMillis(),
-                    MessageType.PING);
-        }
     }
 
     void queuePacket(QuorumPacket p) {
@@ -551,11 +523,7 @@ public class LearnerHandler extends Thread {
     }
 
     public boolean synced() {
-        boolean failed = false;
-        synchronized (leader.getLeanersFd()) {
-            failed = leader.getLeanersFd().isFailed(
-                    String.valueOf(sid), System.currentTimeMillis());
-        }
-        return isAlive() && !failed;
+        return isAlive()
+                && tickOfLastAck >= leader.self.tick - leader.self.syncLimit;
     }
 }

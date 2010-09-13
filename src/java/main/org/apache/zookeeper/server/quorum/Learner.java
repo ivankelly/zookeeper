@@ -39,7 +39,6 @@ import org.apache.log4j.Logger;
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.ServerCnxn;
 import org.apache.zookeeper.server.ZooTrace;
-import org.apache.zookeeper.server.quorum.LearnerSessionTracker.SessionInfo;
 import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
 
 /**
@@ -351,15 +350,11 @@ public class Learner {
         // Send back the ping with our session data
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         DataOutputStream dos = new DataOutputStream(bos);
-        HashMap<Long, SessionInfo> touchTable = zk
+        HashMap<Long, Integer> touchTable = zk
                 .getTouchSnapshot();
-        for (Entry<Long, SessionInfo> entry : touchTable.entrySet()) {
+        for (Entry<Long, Integer> entry : touchTable.entrySet()) {
             dos.writeLong(entry.getKey());
-            SessionInfo s = entry.getValue();
-            dos.writeInt(s.timeout);
-            dos.writeBoolean(s.updatedSample);
-            dos.writeLong(s.interArrivalMean);
-            dos.writeLong(s.interArrivalStdDev);
+            dos.writeInt(entry.getValue());
         }
         qp.setData(bos.toByteArray());
         writePacket(qp, true);
