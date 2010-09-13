@@ -1011,6 +1011,7 @@ static PyObject *pyzoo_create(PyObject *self, PyObject *args)
   }
   zhandle_t *zh = zhandles[zkhid];
   int err = zoo_create(zh, path, values, valuelen, &aclv, flags, realbuf, maxbuf_len);
+  free_acls(&aclv);
   if (err != ZOK) {
     PyErr_SetString(err_to_exception(err), zerror(err));
     return NULL;
@@ -1183,7 +1184,7 @@ static PyObject *pyzoo_get(PyObject *self, PyObject *args)
   }
   buffer = malloc(sizeof(char)*buffer_len);
   if (buffer == NULL) {
-    free(pw);
+    free_pywatcher(pw);
     PyErr_SetString(PyExc_MemoryError, "buffer could not be allocated in pyzoo_get");
     return NULL;
   }
@@ -1193,14 +1194,17 @@ static PyObject *pyzoo_get(PyObject *self, PyObject *args)
                      pw, buffer, 
                      &buffer_len, &stat);
  
-  PyObject *stat_dict = build_stat( &stat );
-
   if (err != ZOK) {
     PyErr_SetString(err_to_exception(err), zerror(err));
+    free_pywatcher(pw);
+    free(buffer);
     return NULL;
   }
+
+  PyObject *stat_dict = build_stat( &stat );
   PyObject *ret = Py_BuildValue( "(s#,N)", buffer,buffer_len, stat_dict );
   free(buffer);
+
   return ret;
 }
 
@@ -1383,7 +1387,7 @@ PyObject *pyzoo_recv_timeout(PyObject *self, PyObject *args)
   return Py_BuildValue("i",recv_timeout);  
 }
 
-/* Returns > 0 if connection is unrecoverable, 0 otherwise */
+/* Returns True if connection is unrecoverable, False otherwise */
 PyObject *pyis_unrecoverable(PyObject *self, PyObject *args)
 {
   int zkhid;
@@ -1391,7 +1395,9 @@ PyObject *pyis_unrecoverable(PyObject *self, PyObject *args)
     return NULL;
   CHECK_ZHANDLE(zkhid);
   int ret = is_unrecoverable(zhandles[zkhid]);
-  return Py_BuildValue("i",ret); // TODO: make this a boolean
+  if (ret > 0)
+    Py_RETURN_TRUE;
+  Py_RETURN_FALSE;
 }
 
 /* Set the debug level for logging, returns None */
