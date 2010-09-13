@@ -21,6 +21,7 @@ package org.apache.zookeeper.server;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
 
+import org.apache.zookeeper.common.fd.FailureDetector;
 import org.apache.zookeeper.server.quorum.QuorumPeerConfig;
 import org.apache.zookeeper.server.quorum.QuorumPeerConfig.ConfigException;
 
@@ -44,6 +45,8 @@ public class ServerConfig {
     protected int minSessionTimeout = -1;
     /** defaults to -1 if not set explicitly */
     protected int maxSessionTimeout = -1;
+    private FailureDetector sessionsFD;
+    private FailureDetector learnersFD;
 
     /**
      * Parse arguments for server configuration
@@ -95,6 +98,8 @@ public class ServerConfig {
       maxClientCnxns = config.getMaxClientCnxns();
       minSessionTimeout = config.getMinSessionTimeout();
       maxSessionTimeout = config.getMaxSessionTimeout();
+      sessionsFD = config.getSessionsFailureDetector();
+      learnersFD = config.getLearnersFailureDetector();
     }
 
     public InetSocketAddress getClientPortAddress() {
@@ -108,4 +113,6 @@ public class ServerConfig {
     public int getMinSessionTimeout() { return minSessionTimeout; }
     /** maximum session timeout in milliseconds, -1 if unset */
     public int getMaxSessionTimeout() { return maxSessionTimeout; }
+    public FailureDetector getSessionsFailureDetector() { return sessionsFD; }
+    public FailureDetector getLearnersFailureDetector() { return learnersFD; }
 }

@@ -20,24 +20,26 @@ package org.apache.zookeeper.server.quorum;
 import java.io.IOException;
 import java.util.HashMap;
 
+import org.apache.zookeeper.common.fd.FailureDetector;
 import org.apache.zookeeper.jmx.MBeanRegistry;
 import org.apache.zookeeper.server.DataTreeBean;
 import org.apache.zookeeper.server.ServerCnxn;
 import org.apache.zookeeper.server.ZKDatabase;
 import org.apache.zookeeper.server.ZooKeeperServerBean;
 import org.apache.zookeeper.server.persistence.FileTxnSnapLog;
+import org.apache.zookeeper.server.quorum.LearnerSessionTracker.SessionInfo;
 
 /**
  * Parent class for all ZooKeeperServers for Learners 
  */
 public abstract class LearnerZooKeeperServer extends QuorumZooKeeperServer {    
     public LearnerZooKeeperServer(FileTxnSnapLog logFactory, int tickTime,
-            int minSessionTimeout, int maxSessionTimeout,
+            FailureDetector fd, int minSessionTimeout, int maxSessionTimeout,
             DataTreeBuilder treeBuilder, ZKDatabase zkDb, QuorumPeer self)
         throws IOException
     {
         super(logFactory, tickTime, minSessionTimeout, maxSessionTimeout,
-                treeBuilder, zkDb, self);
+                fd, treeBuilder, zkDb, self);
     }
 
     /**
@@ -53,11 +55,11 @@ public abstract class LearnerZooKeeperServer extends QuorumZooKeeperServer {
      * used by a Learner to build a ping response packet.
      * 
      */
-    protected HashMap<Long, Integer> getTouchSnapshot() {
+    protected HashMap<Long, SessionInfo> getTouchSnapshot() {
         if (sessionTracker != null) {
             return ((LearnerSessionTracker) sessionTracker).snapshot();
         }
-        return new HashMap<Long, Integer>();
+        return new HashMap<Long, SessionInfo>();
     }
     
     /**

@@ -51,7 +51,7 @@ public class ObserverZooKeeperServer extends LearnerZooKeeperServer {
         
     ObserverZooKeeperServer(FileTxnSnapLog logFactory, QuorumPeer self,
             DataTreeBuilder treeBuilder, ZKDatabase zkDb) throws IOException {
-        super(logFactory, self.tickTime, self.minSessionTimeout,
+        super(logFactory, self.tickTime, self.sessionsFd, self.minSessionTimeout,
                 self.maxSessionTimeout, treeBuilder, zkDb, self);
     }
     

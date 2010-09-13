@@ -32,6 +32,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.log4j.Logger;
+import org.apache.zookeeper.common.fd.FailureDetector;
+import org.apache.zookeeper.common.fd.FixedPingFailureDetector;
 import org.apache.zookeeper.jmx.MBeanRegistry;
 import org.apache.zookeeper.jmx.ZKMBeanInfo;
 import org.apache.zookeeper.server.ServerCnxnFactory;
@@ -235,6 +237,17 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
      */
     protected int tick;
 
+    /**
+     * The failure detector to be used in session tracking
+     */
+    protected FailureDetector sessionsFd;
+    
+    /**
+     * The failure detector to be used in learners tracking. 
+     * FixedPingFailureDetector is the default one.
+     */
+    protected FailureDetector leanersFd = new FixedPingFailureDetector();
+    
     /**
      * This class simply responds to requests for the current leader of this
      * node.
@@ -956,5 +969,21 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
 
     public boolean isRunning() {
         return running;
+    }
+    
+    public void setSessionsFD(FailureDetector fd) {
+        this.sessionsFd = fd;
+    }
+
+    public void setLearnersFD(FailureDetector fd) {
+        this.leanersFd = fd;
+    }
+    
+    public FailureDetector getSessionsFd() {
+        return sessionsFd;
+    }
+    
+    public FailureDetector getLeanersFd() {
+        return leanersFd;
     }
 }
