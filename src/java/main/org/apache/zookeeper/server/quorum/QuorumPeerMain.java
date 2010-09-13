@@ -139,7 +139,8 @@ public class QuorumPeerMain {
           quorumPeer.setCnxnFactory(cnxnFactory);
           quorumPeer.setZKDatabase(new ZKDatabase(quorumPeer.getTxnFactory()));
           quorumPeer.setLearnerType(config.getPeerType());
-  
+          quorumPeer.setSessionsFD(config.getSessionsFailureDetector());
+          quorumPeer.setLearnersFD(config.getLearnersFailureDetector());
           quorumPeer.start();
           quorumPeer.join();
       } catch (InterruptedException e) {

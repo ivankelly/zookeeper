@@ -40,6 +40,8 @@ import org.apache.zookeeper.Environment;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.KeeperException.SessionExpiredException;
 import org.apache.zookeeper.ZooDefs.OpCode;
+import org.apache.zookeeper.common.fd.FailureDetector;
+import org.apache.zookeeper.common.fd.SlicedPingFailureDetector;
 import org.apache.zookeeper.data.ACL;
 import org.apache.zookeeper.data.Id;
 import org.apache.zookeeper.data.StatPersisted;
@@ -117,6 +119,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     private ServerCnxnFactory serverCnxnFactory;
 
     private final ServerStats serverStats;
+    private FailureDetector failureDetector;
 
     void removeCnxn(ServerCnxn cnxn) {
         zkDb.removeCnxn(cnxn);
@@ -141,9 +144,10 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
      * @throws IOException
      */
     public ZooKeeperServer(FileTxnSnapLog txnLogFactory, int tickTime,
-            int minSessionTimeout, int maxSessionTimeout,
+            int minSessionTimeout, int maxSessionTimeout, FailureDetector fd,
             DataTreeBuilder treeBuilder, ZKDatabase zkDb) throws IOException {
         serverStats = new ServerStats(this);
+        this.failureDetector = fd;
         this.txnLogFactory = txnLogFactory;
         this.zkDb = zkDb;
         this.tickTime = tickTime;
@@ -165,8 +169,8 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
      * @throws IOException
      */
     public ZooKeeperServer(FileTxnSnapLog txnLogFactory, int tickTime,
-            DataTreeBuilder treeBuilder) throws IOException {
-        this(txnLogFactory, tickTime, -1, -1, treeBuilder,
+            FailureDetector fd, DataTreeBuilder treeBuilder) throws IOException {
+        this(txnLogFactory, tickTime, -1, -1, fd, treeBuilder,
                 new ZKDatabase(txnLogFactory));
     }
     
@@ -202,7 +206,8 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     public ZooKeeperServer(File snapDir, File logDir, int tickTime)
             throws IOException {
         this( new FileTxnSnapLog(snapDir, logDir),
-                tickTime, new BasicDataTreeBuilder());
+                tickTime, new SlicedPingFailureDetector(tickTime), 
+                new BasicDataTreeBuilder());
     }
 
     /**
@@ -214,8 +219,9 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             DataTreeBuilder treeBuilder)
         throws IOException
     {
-        this(txnLogFactory, DEFAULT_TICK_TIME, -1, -1, treeBuilder,
-                new ZKDatabase(txnLogFactory));
+        this(txnLogFactory, DEFAULT_TICK_TIME, -1, -1, 
+                new SlicedPingFailureDetector(DEFAULT_TICK_TIME),
+                treeBuilder, new ZKDatabase(txnLogFactory));
     }
 
     /**
@@ -327,13 +333,19 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         }
     }
     
-    void touch(ServerCnxn cnxn) throws MissingSessionException {
+    void touch(ServerCnxn cnxn, int requestType) throws MissingSessionException {
         if (cnxn == null) {
             return;
         }
         long id = cnxn.getSessionId();
         int to = cnxn.getSessionTimeout();
-        if (!sessionTracker.touchSession(id, to)) {
+        
+        boolean isPing = requestType == OpCode.ping;
+        
+        boolean touched = (isPing) ? sessionTracker.pingSession(id, to)
+                : sessionTracker.touchSession(id, to);
+
+        if (!touched) {
             throw new MissingSessionException(
                     "No session with sessionid 0x" + Long.toHexString(id)
                     + " exists, probably expired and removed");
@@ -393,7 +405,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
 
     protected void createSessionTracker() {
         sessionTracker = new SessionTrackerImpl(this, zkDb.getSessionWithTimeOuts(),
-                tickTime, 1);
+                tickTime, 1, failureDetector);
         ((SessionTrackerImpl)sessionTracker).start();
     }
 
@@ -624,7 +636,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             }
         }
         try {
-            touch(si.cnxn);
+            touch(si.cnxn, si.type);
             boolean validpacket = Request.isValid(si.type);
             if (validpacket) {
                 firstProcessor.processRequest(si);
@@ -750,6 +762,10 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
 
     public void dumpEphemerals(PrintWriter pwriter) {
     	zkDb.dumpEphemerals(pwriter);
+    }
+
+    public void setFailureDetector(FailureDetector failureDetector) {
+        this.failureDetector = failureDetector;
     }
     
     public void processConnectRequest(ServerCnxn cnxn, ByteBuffer incomingBuffer) throws IOException {

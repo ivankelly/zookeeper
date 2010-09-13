@@ -53,6 +53,8 @@ import org.apache.zookeeper.ZooDefs.OpCode;
 import org.apache.zookeeper.ZooKeeper.States;
 import org.apache.zookeeper.ZooKeeper.WatchRegistration;
 import org.apache.zookeeper.common.PathUtils;
+import org.apache.zookeeper.common.fd.FailureDetector;
+import org.apache.zookeeper.common.fd.MessageType;
 import org.apache.zookeeper.proto.AuthPacket;
 import org.apache.zookeeper.proto.ConnectRequest;
 import org.apache.zookeeper.proto.ConnectResponse;
@@ -156,6 +158,8 @@ public class ClientCnxn {
 
     final Selector selector = Selector.open();
 
+    private final FailureDetector failureDetector;
+    
     /**
      * Set to true when close is called. Latches the connection such that we
      * don't attempt to re-connect to the server if in the middle of closing the
@@ -319,13 +323,14 @@ public class ClientCnxn {
      * @param zooKeeper
      *                the zookeeper object that this connection is related to.
      * @param watcher watcher for this connection
+     * @param fd the failure detection method to be used in server monitoring.
      * @throws IOException
      */
     public ClientCnxn(String hosts, int sessionTimeout, ZooKeeper zooKeeper,
-            ClientWatchManager watcher)
+            ClientWatchManager watcher, FailureDetector fd)
         throws IOException
     {
-        this(hosts, sessionTimeout, zooKeeper, watcher, 0, new byte[16]);
+        this(hosts, sessionTimeout, zooKeeper, watcher, fd, 0, new byte[16]);
     }
 
     /**
@@ -340,18 +345,20 @@ public class ClientCnxn {
      * @param zooKeeper
      *                the zookeeper object that this connection is related to.
      * @param watcher watcher for this connection
+     * @param fd the failure detection method to be used in server monitoring.
      * @param sessionId session id if re-establishing session
      * @param sessionPasswd session passwd if re-establishing session
      * @throws IOException
      */
     public ClientCnxn(String hosts, int sessionTimeout, ZooKeeper zooKeeper,
-            ClientWatchManager watcher, long sessionId, byte[] sessionPasswd)
+            ClientWatchManager watcher, FailureDetector fd, long sessionId, byte[] sessionPasswd)
         throws IOException
     {
         this.zooKeeper = zooKeeper;
         this.watcher = watcher;
         this.sessionId = sessionId;
         this.sessionPasswd = sessionPasswd;
+        this.failureDetector = fd;
 
         // parse out chroot, if any
         int off = hosts.indexOf('/');
@@ -729,7 +736,7 @@ public class ClientCnxn {
                     Watcher.Event.KeeperState.SyncConnected, null));
         }
 
-        void readResponse() throws IOException {
+        ResponseType readResponse() throws IOException {
             ByteBufferInputStream bbis = new ByteBufferInputStream(
                     incomingBuffer);
             BinaryInputArchive bbia = BinaryInputArchive.getArchive(bbis);
@@ -745,7 +752,7 @@ public class ClientCnxn {
                             + ((System.nanoTime() - lastPingSentNs) / 1000000)
                             + "ms");
                 }
-                return;
+                return ResponseType.PING;
             }
             if (replyHdr.getXid() == -4) {
                 // -2 is the xid for AuthPacket
@@ -754,7 +761,7 @@ public class ClientCnxn {
                     LOG.debug("Got auth sessionid:0x"
                             + Long.toHexString(sessionId));
                 }
-                return;
+                return ResponseType.APPMESSAGE;
             }
             if (replyHdr.getXid() == -1) {
                 // -1 means notification
@@ -781,7 +788,7 @@ public class ClientCnxn {
                 }
 
                 eventThread.queueEvent( we );
-                return;
+                return ResponseType.APPMESSAGE;
             }
             if (pendingQueue.size() == 0) {
                 throw new IOException("Nothing in the queue, but got "
@@ -818,18 +825,21 @@ public class ClientCnxn {
                     LOG.debug("Reading reply sessionid:0x"
                             + Long.toHexString(sessionId) + ", packet:: " + packet);
                 }
+                
+                return ResponseType.APPMESSAGE;
+                
             } finally {
                 finishPacket(packet);
             }
         }
 
         /**
-         * @return true if a packet was received
+         * @return the response type, null if no packet was received
          * @throws InterruptedException
          * @throws IOException
          */
-        boolean doIO() throws InterruptedException, IOException {
-            boolean packetReceived = false;
+        ResponseType doIO() throws InterruptedException, IOException {
+            ResponseType responseRcvType = null;
             SocketChannel sock = (SocketChannel) sockKey.channel();
             if (sock == null) {
                 throw new IOException("Socket is null!");
@@ -855,13 +865,12 @@ public class ClientCnxn {
                         }
                         lenBuffer.clear();
                         incomingBuffer = lenBuffer;
-                        packetReceived = true;
+                        responseRcvType = ResponseType.APPMESSAGE;
                         initialized = true;
                     } else {
-                        readResponse();
+                        responseRcvType = readResponse();
                         lenBuffer.clear();
                         incomingBuffer = lenBuffer;
-                        packetReceived = true;
                     }
                 }
             }
@@ -887,7 +896,7 @@ public class ClientCnxn {
             } else {
                 enableWrite();
             }
-            return packetReceived;
+            return responseRcvType;
         }
 
         synchronized private void enableWrite() {
@@ -991,7 +1000,11 @@ public class ClientCnxn {
 
         Random r = new Random(System.nanoTime());
 
+        private String serverAddress;
+
         private void startConnect() throws IOException {
+            boolean connectingToLast = false;
+            
             if (lastConnectIndex == -1) {
                 // We don't want to delay the first try at a connect, so we
                 // start with -1 the first time around
@@ -1003,13 +1016,14 @@ public class ClientCnxn {
                     LOG.warn("Unexpected exception", e1);
                 }
                 if (nextAddrToTry == lastConnectIndex) {
+                    connectingToLast = true;
                     try {
                         // Try not to spin too fast!
                         Thread.sleep(1000);
                     } catch (InterruptedException e) {
                         LOG.warn("Unexpected exception", e);
                     }
-                }
+                } 
             }
             zooKeeper.state = States.CONNECTING;
             currentConnectIndex = nextAddrToTry;
@@ -1026,12 +1040,23 @@ public class ClientCnxn {
             sock.socket().setTcpNoDelay(true);
             setName(getName().replaceAll("\\(.*\\)",
                     "(" + addr.getHostName() + ":" + addr.getPort() + ")"));
+            String lastAddress = serverAddress;
+            serverAddress = addr.toString();
+            
+            if (!connectingToLast) {
+                if (lastAddress != null) {
+                    failureDetector.releaseMonitored(lastAddress);
+                }
+                failureDetector.registerMonitored(getCurrentServerAddress(), 
+                        System.currentTimeMillis(), connectTimeout);
+            }
+            
             sockKey = sock.register(selector, SelectionKey.OP_CONNECT);
             if (sock.connect(addr)) {
                 primeConnection(sockKey);
             }
             initialized = false;
-
+            
             /*
              * Reset incomingBuffer
              */
@@ -1045,8 +1070,6 @@ public class ClientCnxn {
         @Override
         public void run() {
             long now = System.currentTimeMillis();
-            long lastHeard = now;
-            long lastSend = now;
             while (zooKeeper.state.isAlive()) {
                 try {
                     if (sockKey == null) {
@@ -1055,31 +1078,38 @@ public class ClientCnxn {
                             break;
                         }
                         startConnect();
-                        lastSend = now;
-                        lastHeard = now;
+                        appMessageSent(now);
+                        appMessageReceived(now);
                     }
-                    int idleRecv = (int) (now - lastHeard);
-                    int idleSend = (int) (now - lastSend);
-                    int to = readTimeout - idleRecv;
+                    
+                    failureDetector.setTimeout(getCurrentServerAddress(), readTimeout);
+                    
                     if (zooKeeper.state != States.CONNECTED) {
-                        to = connectTimeout - idleRecv;
+                        failureDetector.setTimeout(getCurrentServerAddress(), connectTimeout);
                     }
-                    if (to <= 0) {
+                    
+                    int to = (int) (failureDetector.getTimeout(getCurrentServerAddress()) - 
+                            failureDetector.getIdleTime(getCurrentServerAddress(), now));
+                    
+                    if (failureDetector.isFailed(getCurrentServerAddress(), now)) {
                         throw new SessionTimeoutException(
                                 "Client session timed out, have not heard from server in "
-                                + idleRecv + "ms"
+                                + failureDetector.getIdleTime(getCurrentServerAddress(), now) + "ms"
                                 + " for sessionid 0x"
                                 + Long.toHexString(sessionId));
                     }
+                    
                     if (zooKeeper.state == States.CONNECTED) {
-                        int timeToNextPing = readTimeout/2 - idleSend;
-                        if (timeToNextPing <= 0) {
+                        if (failureDetector.shouldPing(getCurrentServerAddress(), now)) {
                             sendPing();
-                            lastSend = now;
+                            failureDetector.messageSent(getCurrentServerAddress(), 
+                                    now, MessageType.PING);
                             enableWrite();
                         } else {
+                            long timeToNextPing = failureDetector.getTimeToNextPing(
+                                    getCurrentServerAddress(), now);
                             if (timeToNextPing < to) {
-                                to = timeToNextPing;
+                                to = (int) timeToNextPing;
                             }
                         }
                     }
@@ -1097,19 +1127,25 @@ public class ClientCnxn {
                         SocketChannel sc = ((SocketChannel) k.channel());
                         if ((k.readyOps() & SelectionKey.OP_CONNECT) != 0) {
                             if (sc.finishConnect()) {
-                                lastHeard = now;
-                                lastSend = now;
+                                appMessageReceived(now);
+                                appMessageSent(now);
                                 primeConnection(k);
                             }
                         } else if ((k.readyOps() & (SelectionKey.OP_READ | SelectionKey.OP_WRITE)) != 0) {
                             if (outgoingQueue.size() > 0) {
-                                // We have something to send so it's the same
-                                // as if we do the send now.
-                                lastSend = now;
+                                appMessageSent(now);
                             }
-                            if (doIO()) {
-                                lastHeard = now;
+                            ResponseType responseType = doIO();
+                            
+                            if (responseType != null) {
+                                if (ResponseType.APPMESSAGE.equals(responseType)) {
+                                    appMessageReceived(now);
+                                } else if (ResponseType.PING.equals(responseType)) {
+                                    failureDetector.messageReceived(
+                                            getCurrentServerAddress(), now, MessageType.PING);
+                                }
                             }
+                            
                         }
                     }
                     if (zooKeeper.state == States.CONNECTED) {
@@ -1156,8 +1192,8 @@ public class ClientCnxn {
                         }
 
                         now = System.currentTimeMillis();
-                        lastHeard = now;
-                        lastSend = now;
+                        appMessageReceived(now);
+                        appMessageSent(now);
                     }
                 }
             }
@@ -1181,6 +1217,22 @@ public class ClientCnxn {
             }
             ZooTrace.logTraceMessage(LOG, ZooTrace.getTextTraceLevel(),
                                      "SendThread exitedloop.");
+        }
+
+        private void appMessageSent(long now) {
+            failureDetector.messageSent(
+                    getCurrentServerAddress(), now, 
+                    MessageType.APPLICATION);
+        }
+
+        private void appMessageReceived(long now) {
+            failureDetector.messageReceived(
+                    getCurrentServerAddress(), now, 
+                    MessageType.APPLICATION);
+        }
+
+        private String getCurrentServerAddress() {
+            return serverAddress;
         }
 
         private void cleanup() {
@@ -1236,6 +1288,7 @@ public class ClientCnxn {
                 }
                 outgoingQueue.clear();
             }
+            
         }
 
         public void close() {
@@ -1292,6 +1345,10 @@ public class ClientCnxn {
 
     synchronized private int getXid() {
         return xid++;
+    }
+    
+    private enum ResponseType {
+        PING, APPMESSAGE;
     }
 
     public ReplyHeader submitRequest(RequestHeader h, Record request,

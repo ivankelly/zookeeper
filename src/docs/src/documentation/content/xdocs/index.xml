@@ -65,6 +65,7 @@
       <li><a href="zookeeperJMX.html">JMX</a> - how to enable JMX in ZooKeeper</li>
       <li><a href="zookeeperHierarchicalQuorums.html">Hierarchical quorums</a></li>
       <li><a href="zookeeperObservers.html">Observers</a> - non-voting ensemble members that easily improve ZooKeeper's scalability</li>
+      <li><a href="zookeeperFailureDetector.html">Failure Detector Module</a> - how to configure failure detection in ZooKeeper</li>
       </ul>
       </li>
       
