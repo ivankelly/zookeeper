@@ -86,6 +86,9 @@ BUGFIXES:
   ZOOKEEPER-861. Missing the test SSL certificate used for running junit tests.
   (erwin tam via mahadev)
 
+  ZOOKEEPER-867. ClientTest is failing on hudson - fd cleanup (phunt)
+
+  ZOOKEEPER-785. Zookeeper 3.3.1 shouldn't infinite loop if someone creates a server.0 line (phunt and Andrei Savu via breed)
 
 IMPROVEMENTS:
   ZOOKEEPER-724. Improve junit test integration - log harness information 
